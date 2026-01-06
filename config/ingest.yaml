@@ -1,0 +1,12 @@
+github:
+  user: PavanChandan29
+  include_private: false
+
+ingestion:
+  max_commits_per_repo: 200
+  fetch_readme: true
+  fetch_commit_details: true
+  detect_repo_signals: true
+
+storage:
+  data_dir: ~/.github-mcp

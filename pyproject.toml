@@ -1,0 +1,16 @@
+[project]
+name = "github-mcp"
+version = "0.1.0"
+description = "GitHub profile MCP: ingest GitHub repos/commits into a local store and expose them via an MCP server."
+requires-python = ">=3.10"
+dependencies = [
+  "mcp[cli]>=1.2.0",
+  "httpx>=0.27.0",
+  "pydantic>=2.7.0",
+  "python-dotenv>=1.0.1"
+]
+
+[project.scripts]
+github-mcp-server = "github_mcp.server:main"
+github-mcp-ingest = "github_mcp.ingest:main"
+github-mcp-query = "github_mcp.query_client:main"
