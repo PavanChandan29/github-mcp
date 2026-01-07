@@ -4,40 +4,98 @@ GitHub MCP is a **Model Context Protocol (MCP) server** that ingests a GitHub
 user’s public repositories and commit history into a **local, persistent store**
 and exposes that data via MCP tools for agents and LLMs to query.
 
-This project is designed to **ingest once and query many times**, avoiding
+The project is designed to **ingest once and query many times**, avoiding
 repeated GitHub API calls during analysis.
+
+---
+
+## What Problem This Solves
+
+Analyzing GitHub profiles using LLMs typically involves:
+
+- Repeated GitHub API calls (rate limits and latency)
+- No persistent context across questions
+- Unstructured, ad-hoc data access
+- Difficulty reasoning over repositories, commits, and quality signals together
+
+GitHub MCP solves this by:
+
+- Decoupling **data ingestion** from **analysis**
+- Persisting GitHub data locally
+- Exposing GitHub data through **structured MCP tools**
+- Enabling deterministic, repeatable analysis by agents
 
 ---
 
 ## How This Project Works
 
-1. **Ingestion phase**
-   - GitHub API is called once
-   - Repositories, READMEs, commit metadata, and repo-level signals are collected
-   - Data is stored locally in a SQLite-based MCP store
+### 1. Ingestion Phase
 
-2. **Serving phase**
-   - An MCP server exposes tools backed by the local store
-   - Agents and LLMs query the MCP server instead of GitHub
+- GitHub API is called once per user
+- Public repositories, READMEs, commit metadata, and repo-level signals are collected
+- Data is stored locally in a **SQLite-backed MCP store**
+
+This creates a stable, queryable knowledge base.
 
 ---
 
-## Important: Module-Based Execution
+### 2. Serving Phase (MCP)
 
-This project is implemented as a **Python package** (`github_mcp`).
+- An MCP server exposes **tools** backed by the local store
+- Each tool represents a **semantic data capability**, such as:
+  - Listing repositories
+  - Reading repository metadata and READMEs
+  - Inspecting commit timelines
+  - Surfacing repo-level quality signals
 
-Because it uses **relative imports**, modules **must be executed using
-Python’s `-m` flag**.
+Agents and LLMs query the MCP server instead of GitHub directly.
 
-🚫 **Do NOT run files directly**, for example:
-```
-python github_mcp/ingest.py   # ❌ incorrect
-
-python -m github_mcp.ingest   # correct 
-```
 ---
-Requirements
 
-Python 3.10+
+### 3. Agent Layer
 
-GitHub Personal Access Token (read-only)
+On top of the MCP server, the project includes an **agent layer built using LangGraph**.
+
+The agent is responsible for:
+
+- Interpreting natural-language questions
+- Deciding **which MCP tool to use**
+- Providing valid arguments for that tool
+- Executing the tool via MCP
+- Converting structured results into clear, human-readable answers
+
+This cleanly separates:
+
+- **Reasoning and planning** (agent)
+- **Data access and execution** (MCP)
+- **Storage and schemas** (local store)
+
+---
+
+## Why an Agent Is Needed
+
+MCP tools expose **capabilities**, but they do not decide:
+
+- When a tool should be used
+- Which tool best answers a question
+- How results should be explained
+
+The agent layer acts as the **planner and interpreter**.
+
+In simple terms:
+
+- **MCP answers:** “What data can be accessed?”
+- **Agent answers:** “What should be done to answer this question?”
+
+---
+
+## Design Principles
+
+- **Ingest once, query many times**
+- **Separate reasoning from data access**
+- **Explicit execution flow and state**
+- **Schema-enforced, structured tool interfaces**
+- **Deterministic and debuggable agent behavior**
+- **No hidden memory or side effects**
+
+---
