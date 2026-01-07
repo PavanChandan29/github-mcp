@@ -10,7 +10,7 @@ from mcp.server.fastmcp import FastMCP
 from .common import LOGGER, connect, fetchall, fetchone, get_db_path, init_schema
 
 # Initialize FastMCP server
-mcp = FastMCP("github-mcp")
+mcp = FastMCP("github_mcp")
 
 
 def _conn_for(user: str):

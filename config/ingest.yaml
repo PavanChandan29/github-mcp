@@ -9,4 +9,4 @@ ingestion:
   detect_repo_signals: true
 
 storage:
-  data_dir: ~/.github-mcp
+  data_dir: /data

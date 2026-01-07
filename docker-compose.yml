@@ -1,0 +1,11 @@
+version: "3.9"
+
+services:
+  github-mcp:
+    build: .
+    container_name: github-mcp
+    environment:
+      GITHUB_TOKEN: ${GITHUB_TOKEN}
+    volumes:
+      - ./config:/app/config
+      - ./data:/data

@@ -8,11 +8,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
-LOGGER = logging.getLogger("github-mcp")
+LOGGER = logging.getLogger("github_mcp")
 logging.basicConfig(level=logging.INFO)
 
-DEFAULT_DB_DIR = Path(os.environ.get("GITHUB_MCP_DATA_DIR", Path.home() / ".github-mcp"))
-DEFAULT_DB_PATH = DEFAULT_DB_DIR / "github-mcp.db"
+DEFAULT_DB_DIR = Path(os.environ.get("GITHUB_MCP_DATA_DIR", Path.home() / ".github_mcp"))
+DEFAULT_DB_PATH = DEFAULT_DB_DIR / "github_mcp.db"
 
 
 def ensure_db_dir() -> Path:
