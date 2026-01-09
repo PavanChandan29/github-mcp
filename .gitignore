@@ -1,4 +1,5 @@
 github_agent/secrets.env
+github_mcp/secrets.env
 
 # Python
 __pycache__/

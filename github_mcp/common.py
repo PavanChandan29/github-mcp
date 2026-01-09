@@ -45,6 +45,18 @@ CREATE TABLE IF NOT EXISTS repos (
     html_url TEXT,
     readme_text TEXT,
     last_ingested_at TEXT,
+    pushed_at TEXT,
+    created_at TEXT,
+    updated_at TEXT,
+    stargazers_count INTEGER DEFAULT 0,
+    forks_count INTEGER DEFAULT 0,
+    watchers_count INTEGER DEFAULT 0,
+    open_issues_count INTEGER DEFAULT 0,
+    size INTEGER DEFAULT 0,
+    topics TEXT,
+    license_name TEXT,
+    is_archived INTEGER DEFAULT 0,
+    is_fork INTEGER DEFAULT 0,
     PRIMARY KEY (user, repo)
 );
 
@@ -72,20 +84,92 @@ CREATE TABLE IF NOT EXISTS repo_signals (
     has_lint_config INTEGER,
     has_precommit INTEGER,
     has_dockerfile INTEGER,
+    has_docker_compose INTEGER DEFAULT 0,
     has_makefile INTEGER,
     detected_test_framework TEXT,
     detected_ci TEXT,
+    has_code_of_conduct INTEGER DEFAULT 0,
+    has_contributing INTEGER DEFAULT 0,
+    has_license INTEGER DEFAULT 0,
+    has_security_policy INTEGER DEFAULT 0,
+    has_issue_templates INTEGER DEFAULT 0,
+    has_pr_templates INTEGER DEFAULT 0,
+    has_changelog INTEGER DEFAULT 0,
+    has_docs INTEGER DEFAULT 0,
+    organization_score REAL DEFAULT 0.0,
+    coding_standards_score REAL DEFAULT 0.0,
+    automation_score REAL DEFAULT 0.0,
+    tech_stack TEXT,
     signals_json TEXT,
     PRIMARY KEY (user, repo)
 );
 
 CREATE INDEX IF NOT EXISTS idx_commits_repo_time
 ON commits(user, repo, authored_at);
+
+CREATE INDEX IF NOT EXISTS idx_repos_pushed_at
+ON repos(user, pushed_at DESC);
 """
 
 
 def init_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA_SQL)
+    
+    # Migrate existing databases: add new columns if they don't exist
+    migration_columns_repos = [
+        ("pushed_at", "TEXT"),
+        ("created_at", "TEXT"),
+        ("updated_at", "TEXT"),
+        ("stargazers_count", "INTEGER DEFAULT 0"),
+        ("forks_count", "INTEGER DEFAULT 0"),
+        ("watchers_count", "INTEGER DEFAULT 0"),
+        ("open_issues_count", "INTEGER DEFAULT 0"),
+        ("size", "INTEGER DEFAULT 0"),
+        ("topics", "TEXT"),
+        ("license_name", "TEXT"),
+        ("is_archived", "INTEGER DEFAULT 0"),
+        ("is_fork", "INTEGER DEFAULT 0"),
+    ]
+    
+    migration_columns_signals = [
+        ("has_docker_compose", "INTEGER DEFAULT 0"),
+        ("has_code_of_conduct", "INTEGER DEFAULT 0"),
+        ("has_contributing", "INTEGER DEFAULT 0"),
+        ("has_license", "INTEGER DEFAULT 0"),
+        ("has_security_policy", "INTEGER DEFAULT 0"),
+        ("has_issue_templates", "INTEGER DEFAULT 0"),
+        ("has_pr_templates", "INTEGER DEFAULT 0"),
+        ("has_changelog", "INTEGER DEFAULT 0"),
+        ("has_docs", "INTEGER DEFAULT 0"),
+        ("organization_score", "REAL DEFAULT 0.0"),
+        ("coding_standards_score", "REAL DEFAULT 0.0"),
+        ("automation_score", "REAL DEFAULT 0.0"),
+        ("tech_stack", "TEXT"),
+    ]
+    
+    for col_name, col_type in migration_columns_repos:
+        try:
+            conn.execute(f"ALTER TABLE repos ADD COLUMN {col_name} {col_type}")
+            conn.commit()
+        except sqlite3.OperationalError:
+            # Column already exists, which is fine
+            pass
+    
+    for col_name, col_type in migration_columns_signals:
+        try:
+            conn.execute(f"ALTER TABLE repo_signals ADD COLUMN {col_name} {col_type}")
+            conn.commit()
+        except sqlite3.OperationalError:
+            # Column already exists, which is fine
+            pass
+    
+    # Try to create index if it doesn't exist
+    try:
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_repos_pushed_at ON repos(user, pushed_at DESC)")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+    
     conn.commit()
 
 

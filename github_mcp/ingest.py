@@ -9,10 +9,16 @@ import yaml
 from pathlib import Path
 
 import httpx
+from dotenv import load_dotenv
 
 from .common import LOGGER, connect, fetchall, fetchone, get_db_path, init_schema, upsert
 
 GITHUB_API = "https://api.github.com"
+
+# Load secrets from secrets.env file in the same directory
+_secrets_path = Path(__file__).parent / "secrets.env"
+if _secrets_path.exists():
+    load_dotenv(_secrets_path)
 
 def load_config() -> dict:
     config_path = Path(__file__).resolve().parents[1] / "config" / "ingest.yaml"
@@ -94,36 +100,92 @@ async def list_tree(user: str, repo: str, token: str, default_branch: str) -> li
 
 def detect_signals(paths: list[str]) -> dict[str, Any]:
     lower = [p.lower() for p in paths]
-
+    
     def has_any(prefixes: list[str]) -> bool:
         return any(any(p.startswith(pref) for pref in prefixes) for p in lower)
-
+    
+    # Test detection
     has_tests = any(
-        p.startswith(("test/", "tests/", "__tests__/")) or p.endswith(("_test.py", ".spec.ts", ".test.ts", ".test.js"))
+        p.startswith(("test/", "tests/", "__tests__/", "spec/")) or 
+        p.endswith(("_test.py", ".spec.ts", ".test.ts", ".test.js", ".test.py", "_spec.rb", ".spec.rb"))
         for p in lower
     )
+    
+    # CI/CD detection
     has_actions = any(p.startswith(".github/workflows/") for p in lower)
     has_ci = has_actions or any(p.startswith((".circleci/", ".gitlab-ci", "azure-pipelines", "jenkinsfile")) for p in lower)
-
+    
+    # Linting and code quality
     lint_files = {
         ".ruff.toml", "ruff.toml", "pyproject.toml", ".flake8", "setup.cfg", ".pylintrc",
-        ".eslintrc", ".eslintrc.json", ".eslintrc.js", ".prettierrc", ".prettierrc.json",
+        ".eslintrc", ".eslintrc.json", ".eslintrc.js", ".eslintrc.cjs", ".eslintrc.yaml",
+        ".prettierrc", ".prettierrc.json", ".prettierrc.js", ".prettierrc.yaml",
+        ".stylelintrc", ".editorconfig", ".clang-format",
     }
-    has_lint = any(p in lint_files for p in lower)
-
+    has_lint = any(p in lint_files or p.endswith(".eslintrc.js") or p.endswith(".prettierrc.json") for p in lower)
+    
+    # Automation and tooling
     has_precommit = any(p == ".pre-commit-config.yaml" for p in lower)
     has_dockerfile = any(p.endswith("dockerfile") or p == "dockerfile" for p in lower)
+    has_docker_compose = any(p.endswith("docker-compose.yml") or p.endswith("docker-compose.yaml") for p in lower)
     has_makefile = any(p == "makefile" for p in lower)
-
-    # very light framework detection
+    
+    # Documentation and organization
+    has_code_of_conduct = any(p in ("code_of_conduct.md", "code-of-conduct.md", ".github/code_of_conduct.md") for p in lower)
+    has_contributing = any(p in ("contributing.md", "contributing.rst", ".github/contributing.md") for p in lower)
+    has_license = any(p.startswith("license") or p.startswith("licence") for p in lower)
+    has_security_policy = any(p in (".github/security.md", "security.md", "security.rst") for p in lower)
+    has_issue_templates = any(p.startswith(".github/issue_template") or ".github/ISSUE_TEMPLATE" in p for p in lower)
+    has_pr_templates = any(p.startswith(".github/pull_request_template") or ".github/PULL_REQUEST_TEMPLATE" in p for p in lower)
+    has_changelog = any(p.startswith(("changelog", "changes", "history")) for p in lower)
+    has_docs = any(p.startswith(("docs/", "documentation/")) for p in lower)
+    
+    # Tech stack detection (from file extensions and configs)
+    tech_stack = set()
+    for p in lower:
+        if p.endswith((".py", "requirements.txt", "pyproject.toml", "setup.py")):
+            tech_stack.add("Python")
+        elif p.endswith((".ts", ".tsx", "tsconfig.json", "package.json")):
+            tech_stack.add("TypeScript")
+        elif p.endswith((".js", ".jsx")):
+            tech_stack.add("JavaScript")
+        elif p.endswith((".java", "pom.xml", "build.gradle")):
+            tech_stack.add("Java")
+        elif p.endswith((".go", "go.mod", "go.sum")):
+            tech_stack.add("Go")
+        elif p.endswith((".rs", "cargo.toml")):
+            tech_stack.add("Rust")
+        elif p.endswith((".rb", "gemfile", "rakefile")):
+            tech_stack.add("Ruby")
+        elif p.endswith((".cpp", ".cc", ".cxx", "cmakelists.txt")):
+            tech_stack.add("C++")
+        elif p.endswith(".c"):
+            tech_stack.add("C")
+        elif p.endswith((".cs", ".csproj")):
+            tech_stack.add("C#")
+        elif p.endswith((".php", "composer.json")):
+            tech_stack.add("PHP")
+        elif p.endswith((".swift", "podfile")):
+            tech_stack.add("Swift")
+        elif p.endswith((".kt", ".kts", "build.gradle.kts")):
+            tech_stack.add("Kotlin")
+        elif p.endswith((".scala", "build.sbt")):
+            tech_stack.add("Scala")
+    
+    # Test framework detection
     detected_test_framework = None
-    if any(p.endswith("pytest.ini") for p in lower) or any(p.endswith("conftest.py") for p in lower):
+    if any(p.endswith("pytest.ini") or p.endswith("conftest.py") or p.endswith("pytest.ini") for p in lower):
         detected_test_framework = "pytest"
-    elif any(p.endswith("jest.config.js") or p.endswith("jest.config.ts") for p in lower):
+    elif any(p.endswith(("jest.config.js", "jest.config.ts", "jest.config.json")) for p in lower):
         detected_test_framework = "jest"
-    elif any(p.endswith("vitest.config.ts") or p.endswith("vitest.config.js") for p in lower):
+    elif any(p.endswith(("vitest.config.ts", "vitest.config.js")) for p in lower):
         detected_test_framework = "vitest"
-
+    elif any(p.endswith(("mocha.opts", ".mocharc.json", ".mocharc.js")) for p in lower):
+        detected_test_framework = "mocha"
+    elif any(p.endswith(("spec_helper.rb", "test_helper.rb")) for p in lower):
+        detected_test_framework = "rspec"
+    
+    # CI/CD detection
     detected_ci = None
     if has_actions:
         detected_ci = "github_actions"
@@ -131,7 +193,27 @@ def detect_signals(paths: list[str]) -> dict[str, Any]:
         detected_ci = "circleci"
     elif any(p.startswith(".gitlab-ci") for p in lower):
         detected_ci = "gitlab_ci"
-
+    elif any("azure-pipelines" in p for p in lower):
+        detected_ci = "azure_pipelines"
+    elif any("jenkinsfile" in p for p in lower):
+        detected_ci = "jenkins"
+    elif any("travis.yml" in p for p in lower):
+        detected_ci = "travis"
+    
+    # Calculate scores (0-100 scale)
+    organization_items = [
+        has_code_of_conduct, has_contributing, has_license, has_security_policy,
+        has_issue_templates, has_pr_templates, has_changelog, has_docs,
+        has_readme := any(p.startswith("readme") for p in lower)
+    ]
+    organization_score = round((sum(organization_items) / len(organization_items)) * 100, 1)
+    
+    coding_standards_items = [has_tests, has_lint, has_precommit, has_ci]
+    coding_standards_score = round((sum(coding_standards_items) / len(coding_standards_items)) * 100, 1)
+    
+    automation_items = [has_actions, has_ci, has_precommit, has_dockerfile, has_docker_compose]
+    automation_score = round((sum(automation_items) / len(automation_items)) * 100, 1)
+    
     return {
         "has_tests": int(has_tests),
         "has_github_actions": int(has_actions),
@@ -139,9 +221,22 @@ def detect_signals(paths: list[str]) -> dict[str, Any]:
         "has_lint_config": int(has_lint),
         "has_precommit": int(has_precommit),
         "has_dockerfile": int(has_dockerfile),
+        "has_docker_compose": int(has_docker_compose),
         "has_makefile": int(has_makefile),
+        "has_code_of_conduct": int(has_code_of_conduct),
+        "has_contributing": int(has_contributing),
+        "has_license": int(has_license),
+        "has_security_policy": int(has_security_policy),
+        "has_issue_templates": int(has_issue_templates),
+        "has_pr_templates": int(has_pr_templates),
+        "has_changelog": int(has_changelog),
+        "has_docs": int(has_docs),
         "detected_test_framework": detected_test_framework or "",
         "detected_ci": detected_ci or "",
+        "organization_score": organization_score,
+        "coding_standards_score": coding_standards_score,
+        "automation_score": automation_score,
+        "tech_stack": ", ".join(sorted(tech_stack)) if tech_stack else "",
         "signals_json": {
             "total_paths": len(paths),
             "sample_paths": paths[:50],
@@ -195,22 +290,53 @@ async def ingest(user: str, token: str, max_commits: int) -> None:
         description = r.get("description") or ""
         language = r.get("language") or ""
         html_url = r.get("html_url") or ""
+        pushed_at = r.get("pushed_at") or ""
+        created_at = r.get("created_at") or ""
+        updated_at = r.get("updated_at") or ""
+        stargazers_count = r.get("stargazers_count", 0)
+        forks_count = r.get("forks_count", 0)
+        watchers_count = r.get("watchers_count", 0)
+        open_issues_count = r.get("open_issues_count", 0)
+        size = r.get("size", 0)
+        topics = json.dumps(r.get("topics", [])) if r.get("topics") else ""
+        license_name = r.get("license", {}).get("name", "") if r.get("license") else ""
+        is_archived = 1 if r.get("archived", False) else 0
+        is_fork = 1 if r.get("fork", False) else 0
+        
         readme_text = await fetch_readme(user, repo, token, default_branch)
 
         upsert(
             conn,
             """
-            INSERT INTO repos(user, repo, default_branch, description, language, html_url, readme_text, last_ingested_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO repos(user, repo, default_branch, description, language, html_url, readme_text, 
+                           last_ingested_at, pushed_at, created_at, updated_at, stargazers_count, 
+                           forks_count, watchers_count, open_issues_count, size, topics, license_name, 
+                           is_archived, is_fork)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(user, repo) DO UPDATE SET
               default_branch=excluded.default_branch,
               description=excluded.description,
               language=excluded.language,
               html_url=excluded.html_url,
               readme_text=excluded.readme_text,
-              last_ingested_at=excluded.last_ingested_at
+              last_ingested_at=excluded.last_ingested_at,
+              pushed_at=excluded.pushed_at,
+              created_at=excluded.created_at,
+              updated_at=excluded.updated_at,
+              stargazers_count=excluded.stargazers_count,
+              forks_count=excluded.forks_count,
+              watchers_count=excluded.watchers_count,
+              open_issues_count=excluded.open_issues_count,
+              size=excluded.size,
+              topics=excluded.topics,
+              license_name=excluded.license_name,
+              is_archived=excluded.is_archived,
+              is_fork=excluded.is_fork
             """,
-            (user, repo, default_branch, description, language, html_url, readme_text, datetime.now(timezone.utc).isoformat()),
+            (user, repo, default_branch, description, language, html_url, readme_text, 
+             datetime.now(timezone.utc).isoformat(), pushed_at, created_at, updated_at,
+             stargazers_count, forks_count, watchers_count, open_issues_count, size, topics,
+             license_name, is_archived, is_fork),
         )
 
         # Signals
@@ -222,9 +348,12 @@ async def ingest(user: str, token: str, max_commits: int) -> None:
                 """
                 INSERT INTO repo_signals(
                   user, repo, has_tests, has_github_actions, has_ci_config, has_lint_config,
-                  has_precommit, has_dockerfile, has_makefile, detected_test_framework, detected_ci, signals_json
+                  has_precommit, has_dockerfile, has_docker_compose, has_makefile, detected_test_framework, detected_ci,
+                  has_code_of_conduct, has_contributing, has_license, has_security_policy,
+                  has_issue_templates, has_pr_templates, has_changelog, has_docs,
+                  organization_score, coding_standards_score, automation_score, tech_stack, signals_json
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(user, repo) DO UPDATE SET
                   has_tests=excluded.has_tests,
                   has_github_actions=excluded.has_github_actions,
@@ -232,17 +361,35 @@ async def ingest(user: str, token: str, max_commits: int) -> None:
                   has_lint_config=excluded.has_lint_config,
                   has_precommit=excluded.has_precommit,
                   has_dockerfile=excluded.has_dockerfile,
+                  has_docker_compose=excluded.has_docker_compose,
                   has_makefile=excluded.has_makefile,
                   detected_test_framework=excluded.detected_test_framework,
                   detected_ci=excluded.detected_ci,
+                  has_code_of_conduct=excluded.has_code_of_conduct,
+                  has_contributing=excluded.has_contributing,
+                  has_license=excluded.has_license,
+                  has_security_policy=excluded.has_security_policy,
+                  has_issue_templates=excluded.has_issue_templates,
+                  has_pr_templates=excluded.has_pr_templates,
+                  has_changelog=excluded.has_changelog,
+                  has_docs=excluded.has_docs,
+                  organization_score=excluded.organization_score,
+                  coding_standards_score=excluded.coding_standards_score,
+                  automation_score=excluded.automation_score,
+                  tech_stack=excluded.tech_stack,
                   signals_json=excluded.signals_json
                 """,
                 (
                     user, repo,
                     sig["has_tests"], sig["has_github_actions"], sig["has_ci_config"], sig["has_lint_config"],
-                    sig["has_precommit"], sig["has_dockerfile"], sig["has_makefile"],
+                    sig["has_precommit"], sig["has_dockerfile"], sig.get("has_docker_compose", 0), sig["has_makefile"],
                     sig["detected_test_framework"], sig["detected_ci"],
-                    __import__("json").dumps(sig["signals_json"]),
+                    sig["has_code_of_conduct"], sig["has_contributing"], sig["has_license"],
+                    sig["has_security_policy"], sig["has_issue_templates"], sig["has_pr_templates"],
+                    sig["has_changelog"], sig["has_docs"],
+                    sig["organization_score"], sig["coding_standards_score"], sig["automation_score"],
+                    sig["tech_stack"],
+                    json.dumps(sig["signals_json"]),
                 ),
             )
         except Exception as e:
@@ -320,9 +467,6 @@ def main():
 
     import asyncio
     asyncio.run(ingest(user, token, max_commits))
-
-    import asyncio
-    asyncio.run(ingest(args.user, token, args.max_commits))
 
 
 if __name__ == "__main__":

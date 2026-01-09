@@ -22,22 +22,39 @@ def _conn_for(user: str):
 
 @mcp.tool()
 async def list_repos(user: str) -> list[dict[str, Any]]:
-    """List repositories ingested for a GitHub user.
+    """List repositories ingested for a GitHub user, ordered by most recently pushed first.
+    Returns comprehensive repo information including stars, forks, dates, and metadata.
 
     Args:
         user: GitHub username whose MCP store should be queried.
     """
     conn = _conn_for(user)
-    return fetchall(
+    # Order by pushed_at DESC (most recent first), with NULLs appearing last
+    repos = fetchall(
         conn,
-        "SELECT repo, description, language, html_url, last_ingested_at FROM repos WHERE user=? ORDER BY repo",
+        """SELECT repo, description, language, html_url, pushed_at, created_at, updated_at,
+                  stargazers_count, forks_count, watchers_count, open_issues_count, 
+                  size, topics, license_name, is_archived, is_fork
+           FROM repos WHERE user=? ORDER BY pushed_at DESC, repo""",
         (user,),
     )
+    
+    # Parse topics JSON for each repo
+    for repo in repos:
+        if repo.get("topics"):
+            try:
+                repo["topics"] = json.loads(repo["topics"])
+            except (json.JSONDecodeError, TypeError):
+                repo["topics"] = []
+        else:
+            repo["topics"] = []
+    
+    return repos
 
 
 @mcp.tool()
 async def get_repo_overview(user: str, repo: str) -> dict[str, Any]:
-    """Get high-level information for a repository, including README and practice signals.
+    """Get comprehensive repository information including metadata, achievements, automation, and quality metrics.
 
     Args:
         user: GitHub username
@@ -48,26 +65,77 @@ async def get_repo_overview(user: str, repo: str) -> dict[str, Any]:
     if not r:
         return {"error": f"Repo not found in MCP store: {user}/{repo}. Run ingestion first."}
     s = fetchone(conn, "SELECT * FROM repo_signals WHERE user=? AND repo=?", (user, repo)) or {}
-    # keep README potentially large; clients can truncate if needed
+    
+    # Parse topics
+    topics = []
+    if r.get("topics"):
+        try:
+            topics = json.loads(r["topics"])
+        except (json.JSONDecodeError, TypeError):
+            topics = []
+    
+    # Get commit count
+    commit_count = fetchone(
+        conn,
+        "SELECT COUNT(*) as count FROM commits WHERE user=? AND repo=?",
+        (user, repo)
+    ) or {}
+    
     return {
         "repo": repo,
         "description": r.get("description", ""),
         "language": r.get("language", ""),
         "html_url": r.get("html_url", ""),
         "default_branch": r.get("default_branch", ""),
+        "created_at": r.get("created_at", ""),
+        "updated_at": r.get("updated_at", ""),
+        "pushed_at": r.get("pushed_at", ""),
         "last_ingested_at": r.get("last_ingested_at", ""),
         "readme_text": r.get("readme_text", ""),
-        "signals": {
-            "has_tests": bool(s.get("has_tests", 0)),
+        "achievements": {
+            "stars": r.get("stargazers_count", 0),
+            "forks": r.get("forks_count", 0),
+            "watchers": r.get("watchers_count", 0),
+            "open_issues": r.get("open_issues_count", 0),
+            "commits": commit_count.get("count", 0),
+        },
+        "metadata": {
+            "size": r.get("size", 0),
+            "topics": topics,
+            "license": r.get("license_name", "") or None,
+            "is_archived": bool(r.get("is_archived", 0)),
+            "is_fork": bool(r.get("is_fork", 0)),
+        },
+        "automation": {
             "has_github_actions": bool(s.get("has_github_actions", 0)),
             "has_ci_config": bool(s.get("has_ci_config", 0)),
-            "has_lint_config": bool(s.get("has_lint_config", 0)),
             "has_precommit": bool(s.get("has_precommit", 0)),
             "has_dockerfile": bool(s.get("has_dockerfile", 0)),
+            "has_docker_compose": bool(s.get("has_docker_compose", 0)),
             "has_makefile": bool(s.get("has_makefile", 0)),
-            "detected_test_framework": s.get("detected_test_framework", "") or "",
-            "detected_ci": s.get("detected_ci", "") or "",
+            "detected_ci": s.get("detected_ci", "") or None,
+            "automation_score": s.get("automation_score", 0.0),
         },
+        "coding_standards": {
+            "has_tests": bool(s.get("has_tests", 0)),
+            "has_lint_config": bool(s.get("has_lint_config", 0)),
+            "has_precommit": bool(s.get("has_precommit", 0)),
+            "has_ci_config": bool(s.get("has_ci_config", 0)),
+            "detected_test_framework": s.get("detected_test_framework", "") or None,
+            "coding_standards_score": s.get("coding_standards_score", 0.0),
+        },
+        "organization": {
+            "has_code_of_conduct": bool(s.get("has_code_of_conduct", 0)),
+            "has_contributing": bool(s.get("has_contributing", 0)),
+            "has_license": bool(s.get("has_license", 0)),
+            "has_security_policy": bool(s.get("has_security_policy", 0)),
+            "has_issue_templates": bool(s.get("has_issue_templates", 0)),
+            "has_pr_templates": bool(s.get("has_pr_templates", 0)),
+            "has_changelog": bool(s.get("has_changelog", 0)),
+            "has_docs": bool(s.get("has_docs", 0)),
+            "organization_score": s.get("organization_score", 0.0),
+        },
+        "tech_stack": s.get("tech_stack", "") or None,
     }
 
 
