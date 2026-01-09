@@ -72,9 +72,24 @@ llm = ChatOpenAI(
 # ============================================================
 
 async def call_mcp_tool(tool: str, args: dict) -> object:
+    # Resolve server command paths relative to config file location
+    server_cmd = MCP_CFG["server_command"].copy()
+    # Resolve relative paths in args
+    resolved_args = []
+    for arg in server_cmd[1:]:
+        if arg and not os.path.isabs(arg):
+            # Resolve relative to config file directory
+            resolved_path = (BASE_DIR / arg).resolve()
+            if resolved_path.exists():
+                resolved_args.append(str(resolved_path))
+            else:
+                resolved_args.append(arg)
+        else:
+            resolved_args.append(arg)
+    
     server = StdioServerParameters(
-        command=MCP_CFG["server_command"][0],
-        args=MCP_CFG["server_command"][1:],
+        command=server_cmd[0],
+        args=resolved_args,
     )
 
     async with stdio_client(server) as (read, write):
