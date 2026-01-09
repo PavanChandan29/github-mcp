@@ -7,7 +7,7 @@ llm:
 mcp:
   server_command:
     - python
-    - github_mcp_server.py
+    - ../github_mcp_server.py
 
 github:
   default_user: PavanChandan29
