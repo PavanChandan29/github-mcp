@@ -1,0 +1,4 @@
+[console_scripts]
+github-mcp-ingest = github_mcp.ingest:main
+github-mcp-query = github_mcp.query_client:main
+github-mcp-server = github_mcp.server:main

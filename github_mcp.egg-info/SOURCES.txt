@@ -1,0 +1,15 @@
+README.md
+pyproject.toml
+github_agent/agent.py
+github_agent/app.py
+github_mcp/__init__.py
+github_mcp/common.py
+github_mcp/ingest.py
+github_mcp/models.py
+github_mcp/server.py
+github_mcp.egg-info/PKG-INFO
+github_mcp.egg-info/SOURCES.txt
+github_mcp.egg-info/dependency_links.txt
+github_mcp.egg-info/entry_points.txt
+github_mcp.egg-info/requires.txt
+github_mcp.egg-info/top_level.txt
