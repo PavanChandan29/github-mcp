@@ -16,4 +16,10 @@ print("\nSample repos:")
 for row in conn.execute(
     "SELECT repo, language, last_ingested_at FROM repos LIMIT 5;"
 ):
+    print("-", row["repo"], "|", row["language"], "|", row["last_ingested_at"])
+
+print("\nRepo signals (tech stack):")
+for row in conn.execute(
+    "SELECT repo, tech_stack FROM repo_signals;"
+):
     print(dict(row))

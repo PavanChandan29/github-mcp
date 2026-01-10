@@ -1,101 +1,186 @@
-# GitHub MCP
+# CodeSense – Intelligent GitHub Profile Analyzer
 
-GitHub MCP is a **Model Context Protocol (MCP) server** that ingests a GitHub
-user’s public repositories and commit history into a **local, persistent store**
-and exposes that data via MCP tools for agents and LLMs to query.
+RepoSense is an **AI-powered GitHub analysis system** that ingests a user’s public repositories into a **local knowledge base** and allows LLM agents to reason over that data using **structured MCP tools**.
 
-The project is designed to **ingest once and query many times**, avoiding
-repeated GitHub API calls during analysis.
+This project was built as a **learning-focused system design exercise** to understand:
 
----
-
-## What Problem This Solves
-
-Analyzing GitHub profiles using LLMs typically involves:
-
-- Repeated GitHub API calls (rate limits and latency)
-- No persistent context across questions
-- Unstructured, ad-hoc data access
-- Difficulty reasoning over repositories, commits, and quality signals together
-
-GitHub MCP solves this by:
-
-- Decoupling **data ingestion** from **analysis**
-- Persisting GitHub data locally
-- Exposing GitHub data through **structured MCP tools**
-- Enabling deterministic, repeatable analysis by agents
+- How to separate **data ingestion**, **storage**, and **reasoning**
+- How to avoid repeated API calls and context loss
+- How agents can reason over *structured tools* instead of raw APIs
+- How to design debuggable, deterministic AI systems
 
 ---
 
-## How This Project Works
+## Why I Built This
 
-### 1. Ingestion Phase
+When you ask an LLM questions like:
 
-- GitHub API is called once per user
-- Public repositories, READMEs, commit metadata, and repo-level signals are collected
-- Data is stored locally in a **SQLite-backed MCP store**
+- *“Which of my projects use Python?”*  
+- *“Do I have CI/CD in any repo?”*  
+- *“Which projects follow SDLC best?”*  
 
-This creates a stable, queryable knowledge base.
+Most AI tools:
 
----
+- Call the GitHub API repeatedly  
+- Lose context between questions  
+- Hallucinate tech stacks  
+- Struggle with multi-repo reasoning  
 
-### 2. Serving Phase (MCP)
+I wanted to build something that:
 
-- An MCP server exposes **tools** backed by the local store
-- Each tool represents a **semantic data capability**, such as:
-  - Listing repositories
-  - Reading repository metadata and READMEs
-  - Inspecting commit timelines
-  - Surfacing repo-level quality signals
+- **Ingests GitHub data once**
+- **Stores it locally**
+- **Exposes it through structured tools**
+- **Lets an agent reason over it deterministically**
 
-Agents and LLMs query the MCP server instead of GitHub directly.
-
----
-
-### 3. Agent Layer
-
-On top of the MCP server, the project includes an **agent layer built using LangGraph**.
-
-The agent is responsible for:
-
-- Interpreting natural-language questions
-- Deciding **which MCP tool to use**
-- Providing valid arguments for that tool
-- Executing the tool via MCP
-- Converting structured results into clear, human-readable answers
-
-This cleanly separates:
-
-- **Reasoning and planning** (agent)
-- **Data access and execution** (MCP)
-- **Storage and schemas** (local store)
+This project is the result of that goal.
 
 ---
 
-## Why an Agent Is Needed
+## Why MCP Instead of Direct GitHub API Calls?
 
-MCP tools expose **capabilities**, but they do not decide:
+Using the GitHub API directly inside an agent causes several problems:
 
-- When a tool should be used
-- Which tool best answers a question
-- How results should be explained
+| Problem | GitHub API + LLM | MCP-Based System |
+|--------|-----------------|------------------|
+| API Rate Limits | Frequent calls | One-time ingestion |
+| Latency | Slow per question | Instant local queries |
+| Context Loss | Each question starts fresh | Persistent local store |
+| Hallucination Risk | High | Low (tool-grounded) |
+| Multi-repo reasoning | Hard | Structured + reliable |
+| Debugging | Difficult | Transparent + logged |
 
-The agent layer acts as the **planner and interpreter**.
+With MCP:
 
-In simple terms:
+- GitHub data becomes **queryable knowledge**, not raw API responses  
+- Agents operate on **stable schemas**, not unstructured JSON  
+- Every action is **explicit and traceable**  
 
-- **MCP answers:** “What data can be accessed?”
-- **Agent answers:** “What should be done to answer this question?”
+MCP turns GitHub from an API into a **local intelligence system**.
+
+---
+
+## System Architecture (High Level)
+
+RepoSense is split into **three clean layers**:
+
+### 1. Ingestion Layer  
+Fetches and stores GitHub data once.
+
+- Repositories  
+- READMEs  
+- File trees  
+- Commits  
+- Engineering signals (CI/CD, tests, Docker, etc.)  
+- Detected tech stack  
+
+Stored in a **SQLite knowledge store**.
+
+---
+
+### 2. MCP Server Layer  
+
+Exposes structured tools like:
+
+- `list_repos`  
+- `get_repo_overview`  
+- `query_repos_by_signals`  
+- `rank_repos_by_activity`  
+- `aggregate_repo_metrics`  
+
+Each tool represents a **semantic capability**, not just raw data.
+
+---
+
+### 3. Agent Layer (LangGraph)
+
+The agent:
+
+- Understands natural-language questions  
+- Creates a **semantic plan**  
+- Chooses the right MCP tools  
+- Executes them  
+- Synthesizes grounded answers  
+
+This separates:
+
+- **Reasoning** → Agent  
+- **Execution** → MCP  
+- **Storage** → SQLite  
+
+Which makes the system **clean, debuggable, and scalable**.
+
+---
+
+## What I Learned From This Project
+
+This was not just about GitHub analysis. It was about learning **AI system design**.
+
+Key takeaways:
+
+- LLMs work best with **structured tools**, not raw APIs  
+- Persistent knowledge > repeated API calls  
+- Separating reasoning from execution makes systems easier to debug  
+- “Semantic planning” is more reliable than keyword routing  
+- Data schemas matter more than prompt engineering  
+
+This project helped me think more like a **platform engineer** than just a prompt engineer.
 
 ---
 
 ## Design Principles
 
-- **Ingest once, query many times**
-- **Separate reasoning from data access**
-- **Explicit execution flow and state**
-- **Schema-enforced, structured tool interfaces**
-- **Deterministic and debuggable agent behavior**
-- **No hidden memory or side effects**
+- Ingest once, query many times  
+- No repeated API calls during analysis  
+- Structured tools over raw JSON  
+- Deterministic execution  
+- Debuggable agent behavior  
+- No hidden memory  
+- No hallucinated data  
+
+---
+
+## Example Questions RepoSense Can Answer
+
+- How many of my projects use Python?  
+- Which repos have CI/CD configured?  
+- Do I use Docker anywhere?  
+- Which projects follow good SDLC practices?  
+- What’s my most active repository?  
+- Which tech stacks do I work with most?  
+
+All answers are grounded in **stored data**, not guesses.
+
+---
+
+## Why This Is Better Than a Simple Chatbot
+
+Most “GitHub AI bots”:
+
+- Just call APIs  
+- Summarize READMEs  
+- Guess tech stacks  
+- Can’t reason across repos  
+
+RepoSense:
+
+- Uses a **local knowledge base**  
+- Uses **structured tools**  
+- Supports **multi-step reasoning**  
+- Produces **auditable answers**  
+
+It’s not just a chatbot.  
+It’s a **GitHub intelligence system**.
+
+---
+
+## Future Improvements
+
+- Embedding-based semantic search  
+- Code-level analysis  
+- Skill profiling  
+- Timeline-based growth analysis  
+- SDLC maturity scoring  
+- Portfolio auto-generation  
 
 ---
