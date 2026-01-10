@@ -206,7 +206,7 @@ async def semantic_plan(state: AgentState) -> AgentState:
     if _looks_like_greeting(question):
         state["plan"] = {
             "type": "direct_answer",
-            "answer": "Hello. Ask me about a GitHub user’s repositories (tech stack, CI/CD, tests, activity, etc.).",
+            "answer": "Hello. You can ask me about a GitHub user’s repositories (tech stack, CI/CD, tests, activity, etc.).",
         }
         state["tool_calls"] = []
         state["tool_results"] = []

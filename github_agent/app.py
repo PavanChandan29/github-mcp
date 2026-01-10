@@ -1,17 +1,131 @@
 import streamlit as st
 import asyncio
-import json
-from pathlib import Path
-from agent import agent, llm, CONFIG, AgentState
+import os
+from agent import agent, CONFIG
 
-# Page config
+# =========================
+# Page Config
+# =========================
 st.set_page_config(
-    page_title="GitHub MCP Agent",
-    page_icon="🤖",
+    page_title="CodeSense",
     layout="wide"
 )
 
-# Initialize session state
+# =========================
+# Light Grey + Olive Theme
+# =========================
+st.markdown("""
+<style>
+
+/* App background */
+.stApp {
+    background-color: #f2f3f5;
+    color: #1f2328;
+    font-family: "Inter", "Segoe UI", sans-serif;
+}
+
+/* Centered title */
+h1 {
+    text-align: center;
+    color: #1f2328;
+    font-weight: 700;
+    margin-bottom: 1.2rem;
+}
+
+/* Settings button */
+button[data-testid="baseButton-secondary"] {
+    background-color: #e6e8eb !important;
+    border: 2px solid #6b8e23 !important;
+    border-radius: 10px !important;
+    padding: 6px 10px !important;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+}
+
+/* Settings icon → DARK GREY */
+button[data-testid="baseButton-secondary"],
+button[data-testid="baseButton-secondary"] span,
+button[data-testid="baseButton-secondary"] span span {
+    color: #5a5a5a !important;
+}
+
+/* Settings panel */
+.stExpander {
+    background-color: #e6e8eb !important;
+    border: 1px solid #d0d7de !important;
+    border-radius: 12px;
+    padding: 10px;
+}
+
+/* Chat message card */
+.chat-message {
+    background-color: #ffffff;
+    border: 1px solid #d0d7de;
+    color: #1f2328;
+    padding: 14px 16px;
+    border-radius: 12px;
+    margin-bottom: 14px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    line-height: 1.5;
+}
+
+/* User message */
+.user-message {
+    border-left: 5px solid #6b8e23;
+}
+
+/* Assistant message */
+.assistant-message {
+    border-left: 5px solid #5a5a5a;
+}
+
+/* Inputs */
+textarea, input {
+    background-color: #ffffff !important;
+    color: #1f2328 !important;
+    border: 1px solid #d0d7de !important;
+    border-radius: 10px !important;
+    padding: 10px !important;
+}
+
+/* Buttons */
+button {
+    background-color: #e6e8eb !important;
+    color: #1f2328 !important;
+    border: 1px solid #6b8e23 !important;
+    border-radius: 10px !important;
+    padding: 8px 14px !important;
+    font-weight: 500;
+    transition: all 0.15s ease-in-out;
+}
+
+button:hover {
+    background-color: #eef1ea !important;
+    color: #1f2328 !important;
+    transform: translateY(-1px);
+}
+
+/* Success / info */
+.stSuccess, .stInfo {
+    color: #6b8e23 !important;
+}
+
+/* Chat input spacing */
+.stChatInputContainer {
+    padding-top: 12px;
+}
+
+/* REMOVE Send icon completely */
+.stChatInput button,
+.stChatInput svg {
+    display: none !important;
+}
+
+</style>
+""", unsafe_allow_html=True)
+
+# =========================
+# Session State
+# =========================
 if 'messages' not in st.session_state:
     st.session_state.messages = []
 
@@ -36,197 +150,112 @@ if 'last_repo' not in st.session_state:
 if 'last_repo_user' not in st.session_state:
     st.session_state.last_repo_user = None
 
-# Custom CSS for settings and chatbot
-st.markdown("""
-    <style>
-    .settings-container {
-        position: fixed;
-        top: 10px;
-        left: 10px;
-        z-index: 1000;
-        background: white;
-        padding: 10px;
-        border-radius: 5px;
-        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-    }
-    
-    .settings-box {
-        background: #f0f2f6;
-        padding: 20px;
-        border-radius: 10px;
-        border: 1px solid #d0d0d0;
-        margin: 20px 0;
-        max-width: 500px;
-    }
-    
-    .fade-out {
-        opacity: 0.3 !important;
-        transition: opacity 0.5s;
-    }
-    
-    button.faded-ok {
-        opacity: 0.3 !important;
-        transition: opacity 0.5s;
-    }
-    
-    .chat-message {
-        padding: 1rem;
-        border-radius: 0.5rem;
-        margin-bottom: 1rem;
-        display: flex;
-    }
-    
-    .user-message {
-        background-color: #e3f2fd;
-        justify-content: flex-end;
-    }
-    
-    .assistant-message {
-        background-color: #f5f5f5;
-        justify-content: flex-start;
-    }
-    </style>
-""", unsafe_allow_html=True)
-
-# Settings button (top left)
+# =========================
+# Settings Button
+# =========================
 with st.container():
     col1, col2 = st.columns([1, 20])
     with col1:
         if st.button("⚙️", key="settings_btn", help="Settings"):
             st.session_state.show_settings = not st.session_state.show_settings
 
-# Settings panel
+# =========================
+# Settings Panel
+# =========================
 if st.session_state.show_settings:
-    with st.container():
-        with st.expander("Settings", expanded=True):
-            # Git Username
-            git_username = st.text_input(
-                "Git Username",
-                value=st.session_state.git_username,
-                key="settings_username"
-            )
-            
-            # Git Token
-            git_token = st.text_input(
-                "Git Token",
-                value=st.session_state.git_token,
-                type="password",
-                key="settings_token"
-            )
-            
-            # Display current LLM model
-            st.text_input(
-                "Current LLM Model",
-                value=st.session_state.llm_model,
-                disabled=True,
-                key="settings_model_display"
-            )
-            
-            # Reset and OK buttons
-            col_reset, col_ok, _ = st.columns([1, 1, 3])
-            
-            with col_reset:
-                if st.button("Reset", key="reset_btn"):
-                    st.session_state.git_username = ""
-                    st.session_state.git_token = ""
-                    st.session_state.settings_saved = False
-                    st.rerun()
-            
-            with col_ok:
-                ok_disabled = st.session_state.settings_saved
-                
-                # Apply fade CSS when settings are saved
-                if ok_disabled:
-                    st.markdown("""
-                        <style>
-                        button[data-baseweb="button"][aria-disabled="true"] {
-                            opacity: 0.3 !important;
-                            transition: opacity 0.5s ease-in-out;
-                        }
-                        </style>
-                    """, unsafe_allow_html=True)
-                
-                ok_clicked = st.button("OK", key="ok_btn", disabled=ok_disabled)
-                if ok_clicked and not ok_disabled:
-                    if git_username and git_token:
-                        st.session_state.git_username = git_username
-                        st.session_state.git_token = git_token
-                        st.session_state.settings_saved = True
-                        st.success("Settings saved!")
-                        st.rerun()
-                    else:
-                        st.warning("Please fill in both Username and Token")
+    with st.expander("Settings", expanded=True):
 
-# Check if credentials are set
+        git_username = st.text_input("Git Username", value=st.session_state.git_username)
+        git_token = st.text_input("Git Token", value=st.session_state.git_token, type="password")
+
+        st.text_input("Current LLM Model", value=st.session_state.llm_model, disabled=True)
+
+        col_reset, col_ok = st.columns(2)
+
+        with col_reset:
+            if st.button("Reset"):
+                st.session_state.git_username = ""
+                st.session_state.git_token = ""
+                st.session_state.settings_saved = False
+                st.rerun()
+
+        with col_ok:
+            if st.button("OK", disabled=st.session_state.settings_saved):
+                if git_username and git_token:
+                    st.session_state.git_username = git_username
+                    st.session_state.git_token = git_token
+                    st.session_state.settings_saved = True
+                    st.success("Settings saved!")
+                    st.rerun()
+                else:
+                    st.info("Please fill in both Username and Token")
+
+# =========================
+# Helpers
+# =========================
 def has_credentials():
     return bool(st.session_state.git_username and st.session_state.git_token)
 
-# Main chatbot interface
-st.title("GitHub MCP Agent 🤖")
+# =========================
+# Title
+# =========================
+st.markdown("<h1>CodeSense 🤖</h1>", unsafe_allow_html=True)
 
-# Display chat messages
+# =========================
+# Chat History
+# =========================
 for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+    role = message["role"]
+    css_class = "user-message" if role == "user" else "assistant-message"
 
-# Chat input
-if prompt := st.chat_input("Ask a question about GitHub repos..."):
-    # Add user message to chat
+    st.markdown(
+        f'<div class="chat-message {css_class}">{message["content"]}</div>',
+        unsafe_allow_html=True
+    )
+
+# =========================
+# Chat Input
+# =========================
+if prompt := st.chat_input("Press Enter to send • Shift+Enter for a new line"):
+
     st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
-    
-    # Check credentials
+
     if not has_credentials():
-        response = "Seems like there's no gas in the car. Please pass the values in settings."
-        with st.chat_message("assistant"):
-            st.markdown(response)
+        response = "Please configure your GitHub username and token in Settings."
         st.session_state.messages.append({"role": "assistant", "content": response})
         st.rerun()
+
     else:
-        # Process with agent
-        with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
-                try:
-                    # Build conversation history from previous messages
-                    import os
-                    os.environ["GITHUB_TOKEN"] = st.session_state.git_token
-                    conversation_history = []
-                    for msg in st.session_state.messages[:-1]:  # Exclude current message
-                        conversation_history.append({
-                            "role": msg["role"],
-                            "content": msg["content"]
-                        })
-                    
-                    # Create initial state with username and conversation context
-                    initial_state = {
-                        "question": prompt,
-                        "username": st.session_state.git_username,
-                        "conversation_history": conversation_history,
-                        "last_repo": st.session_state.last_repo,
-                        "last_repo_user": st.session_state.last_repo_user,
-                        "tool_name": None,
-                        "tool_args": None,
-                        "tool_result": None,
-                        "final_answer": None,
-                    }
-                    
-                    # Run agent
-                    result = asyncio.run(agent.ainvoke(initial_state))
-                    response = result.get("final_answer", "Sorry, I couldn't generate a response.")
-                    
-                    # Update last_repo context from agent result
-                    if result.get("last_repo"):
-                        st.session_state.last_repo = result.get("last_repo")
-                        st.session_state.last_repo_user = result.get("last_repo_user")
-                    
-                except Exception as e:
-                    response = f"Error: {str(e)}"
-                
-                st.markdown(response)
-        
-        # Add assistant response to chat
+        with st.spinner("Thinking..."):
+            try:
+                os.environ["GITHUB_TOKEN"] = st.session_state.git_token
+
+                conversation_history = [
+                    {"role": m["role"], "content": m["content"]}
+                    for m in st.session_state.messages[:-1]
+                ]
+
+                initial_state = {
+                    "question": prompt,
+                    "username": st.session_state.git_username,
+                    "conversation_history": conversation_history,
+                    "last_repo": st.session_state.last_repo,
+                    "last_repo_user": st.session_state.last_repo_user,
+                    "tool_name": None,
+                    "tool_args": None,
+                    "tool_result": None,
+                    "final_answer": None,
+                }
+
+                result = asyncio.run(agent.ainvoke(initial_state))
+                response = result.get("final_answer", "Sorry, I couldn't generate a response.")
+
+                if result.get("last_repo"):
+                    st.session_state.last_repo = result.get("last_repo")
+                    st.session_state.last_repo_user = result.get("last_repo_user")
+
+            except Exception as e:
+                response = f"Error: {str(e)}"
+
         st.session_state.messages.append({"role": "assistant", "content": response})
-        
-        # Rerun to update the display
         st.rerun()
