@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+pydantic
+langchain
+langgraph
+langchain-openai
+openai
+httpx
+python-dotenv
+pyyaml
+mcp
+streamlit
+psycopg2-binary
