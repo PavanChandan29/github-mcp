@@ -1,5 +1,5 @@
 from __future__ import annotations
-
+import json
 import argparse
 import base64
 import logging
@@ -143,34 +143,108 @@ def detect_signals(paths: list[str]) -> dict[str, Any]:
     # Tech stack detection (from file extensions and configs)
     tech_stack = set()
     for p in lower:
-        if p.endswith((".py", "requirements.txt", "pyproject.toml", "setup.py")):
+        # ---------- Python ----------
+        if (
+                p.endswith(".py")
+                or p.endswith("requirements.txt")
+                or p.endswith("pyproject.toml")
+                or p.endswith("setup.py")
+                or "/python" in p
+        ):
             tech_stack.add("Python")
-        elif p.endswith((".ts", ".tsx", "tsconfig.json", "package.json")):
+            # Framework detection
+            if "fastapi" in p:
+                tech_stack.add("FastAPI")
+            elif "flask" in p:
+                tech_stack.add("Flask")
+            elif "django" in p:
+                tech_stack.add("Django")
+            elif "streamlit" in p:
+                tech_stack.add("Streamlit")
+        # ---------- JavaScript / TypeScript ----------
+        elif p.endswith((".ts", ".tsx", "tsconfig.json")):
             tech_stack.add("TypeScript")
-        elif p.endswith((".js", ".jsx")):
+            if "react" in p:
+                tech_stack.add("React")
+            elif "next" in p:
+                tech_stack.add("Next.js")
+            elif "node" in p:
+                tech_stack.add("Node.js")
+        elif p.endswith((".js", ".jsx", "package.json")):
             tech_stack.add("JavaScript")
-        elif p.endswith((".java", "pom.xml", "build.gradle")):
+            if "react" in p:
+                tech_stack.add("React")
+            elif "vue" in p:
+                tech_stack.add("Vue")
+            elif "angular" in p:
+                tech_stack.add("Angular")
+            elif "node" in p:
+                tech_stack.add("Node.js")
+        # ---------- Java / JVM ----------
+        elif p.endswith((".java", "pom.xml", "build.gradle", "build.gradle.kts")):
             tech_stack.add("Java")
+            if "spring" in p:
+                tech_stack.add("Spring")
+        elif p.endswith((".kt", ".kts")):
+            tech_stack.add("Kotlin")
+        elif p.endswith((".scala", "build.sbt")):
+            tech_stack.add("Scala")
+        # ---------- Go / Rust / C / C++ ----------
         elif p.endswith((".go", "go.mod", "go.sum")):
             tech_stack.add("Go")
         elif p.endswith((".rs", "cargo.toml")):
             tech_stack.add("Rust")
-        elif p.endswith((".rb", "gemfile", "rakefile")):
-            tech_stack.add("Ruby")
         elif p.endswith((".cpp", ".cc", ".cxx", "cmakelists.txt")):
             tech_stack.add("C++")
         elif p.endswith(".c"):
             tech_stack.add("C")
+        # ---------- .NET ----------
         elif p.endswith((".cs", ".csproj")):
             tech_stack.add("C#")
+            if "dotnet" in p:
+                tech_stack.add(".NET")
+        # ---------- Web / PHP ----------
         elif p.endswith((".php", "composer.json")):
             tech_stack.add("PHP")
+            if "laravel" in p:
+                tech_stack.add("Laravel")
+        # ---------- Mobile ----------
         elif p.endswith((".swift", "podfile")):
             tech_stack.add("Swift")
-        elif p.endswith((".kt", ".kts", "build.gradle.kts")):
-            tech_stack.add("Kotlin")
-        elif p.endswith((".scala", "build.sbt")):
-            tech_stack.add("Scala")
+        # ---------- Databases / SQL ----------
+        elif p.endswith(".sql") or "/migrations/" in p or "/schema/" in p:
+            tech_stack.add("SQL")
+        elif "dbt_project.yml" in p:
+            tech_stack.add("dbt")
+        elif p.endswith((".pbix", ".pbit")):
+            tech_stack.add("Power BI")
+        elif p.endswith((".twb", ".twbx", ".hyper", ".tds", ".tdsx")):
+            tech_stack.add("Tableau")
+        # ---------- Cloud / IaC ----------
+        elif p.endswith(".tf"):
+            tech_stack.add("Terraform")
+        elif "cloudformation" in p or p.endswith(".yaml") and "aws" in p:
+            tech_stack.add("CloudFormation")
+        elif "bicep" in p:
+            tech_stack.add("Azure Bicep")
+        elif "cdk" in p:
+            tech_stack.add("AWS CDK")
+        # ---------- AI / LLM ----------
+        elif "langgraph" in p:
+            tech_stack.add("LangGraph")
+        elif "langchain" in p:
+            tech_stack.add("LangChain")
+        elif "openai" in p:
+            tech_stack.add("OpenAI")
+        # ---------- DevOps ----------
+        elif "dockerfile" in p:
+            tech_stack.add("Docker")
+        elif "docker-compose" in p:
+            tech_stack.add("Docker Compose")
+        elif "serverless.yml" in p:
+            tech_stack.add("Serverless")
+        elif ".github/workflows" in p:
+            tech_stack.add("GitHub Actions")
     
     # Test framework detection
     detected_test_framework = None

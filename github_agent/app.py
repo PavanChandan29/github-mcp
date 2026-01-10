@@ -189,6 +189,8 @@ if prompt := st.chat_input("Ask a question about GitHub repos..."):
             with st.spinner("Thinking..."):
                 try:
                     # Build conversation history from previous messages
+                    import os
+                    os.environ["GITHUB_TOKEN"] = st.session_state.git_token
                     conversation_history = []
                     for msg in st.session_state.messages[:-1]:  # Exclude current message
                         conversation_history.append({
