@@ -5,7 +5,7 @@ import logging
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from github_mcp.common import connect, get_db_path
+from github_mcp.common import connect, init_schema
 from github_mcp.ingest import ingest
 from github_agent.agent import agent
 
@@ -41,8 +41,7 @@ class QueryRequest(BaseModel):
 @app.on_event("startup")
 def startup_check():
     try:
-        db_path = get_db_path("healthcheck")
-        conn = connect(db_path)
+        conn = connect()
         conn.execute("SELECT 1;")
         conn.close()
 

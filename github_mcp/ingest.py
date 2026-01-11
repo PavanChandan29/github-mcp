@@ -351,8 +351,7 @@ def _iso(dt: Optional[str]) -> str:
 
 
 async def ingest(user: str, token: str, max_commits: int) -> None:
-    db_path = get_db_path(user)
-    conn = connect(db_path)
+    conn = connect()
     init_schema(conn)
 
     repos = await list_repos(user, token)
