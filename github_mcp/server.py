@@ -6,7 +6,7 @@ from typing import Any, Optional
 
 from mcp.server.fastmcp import FastMCP
 
-from .common import LOGGER, connect, fetchall, fetchone, get_db_path, init_schema
+from .common import LOGGER, connect, fetchall, fetchone, init_schema
 
 # Initialize FastMCP server
 mcp = FastMCP("github_mcp")

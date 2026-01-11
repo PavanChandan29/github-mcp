@@ -11,7 +11,7 @@ from pathlib import Path
 import httpx
 from dotenv import load_dotenv
 
-from .common import LOGGER, connect, fetchall, fetchone, get_db_path, init_schema, upsert
+from .common import LOGGER, connect, fetchall, fetchone, init_schema, upsert
 
 GITHUB_API = "https://api.github.com"
 
@@ -505,7 +505,7 @@ async def ingest(user: str, token: str, max_commits: int) -> None:
         except Exception as e:
             LOGGER.warning("Commit ingestion failed for %s/%s: %s", user, repo, e)
 
-    LOGGER.info("Ingestion complete. DB=%s", db_path)
+    LOGGER.info("Ingestion complete. DB=%s", conn)
 
 
 def main():
