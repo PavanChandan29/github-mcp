@@ -13,8 +13,7 @@ mcp = FastMCP("github_mcp")
 
 
 def _conn_for(user: str):
-    db_path = get_db_path(user)
-    conn = connect(db_path)
+    conn = connect()
     init_schema(conn)
     return conn
 
