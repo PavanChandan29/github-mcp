@@ -1,100 +1,119 @@
 from __future__ import annotations
 
 import os
-import asyncio
-from typing import Dict, Any, Optional
-
+import logging
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-# Import your existing agent
-from github_agent.agent import agent, CONFIG
+from github_mcp.common import connect, get_db_path
+from github_mcp.ingest import ingest
+from github_agent.agent import agent
 
-# -----------------------------------------------------------------------------
+import asyncio
+
+# -------------------------------------------------
+# Logging
+# -------------------------------------------------
+LOGGER = logging.getLogger("codesense_api")
+logging.basicConfig(level=logging.INFO)
+
+# -------------------------------------------------
 # FastAPI App
-# -----------------------------------------------------------------------------
+# -------------------------------------------------
+app = FastAPI(title="CodeSense API", version="1.0")
 
-app = FastAPI(
-    title="CodeSense API",
-    description="GitHub Intelligence Agent powered by MCP + LangGraph",
-    version="1.0.0",
-)
-
-# -----------------------------------------------------------------------------
-# Request / Response Models
-# -----------------------------------------------------------------------------
-
-class AskRequest(BaseModel):
-    question: str
-    github_username: str
+# -------------------------------------------------
+# Models
+# -------------------------------------------------
+class IngestRequest(BaseModel):
+    username: str
     github_token: str
 
 
-class AskResponse(BaseModel):
-    answer: str
+class QueryRequest(BaseModel):
+    username: str
+    question: str
 
 
-# -----------------------------------------------------------------------------
-# Health Check
-# -----------------------------------------------------------------------------
-
-@app.get("/health")
-def health():
-    return {"status": "ok", "service": "codesense"}
-
-
-# -----------------------------------------------------------------------------
-# Ask Endpoint (Main API)
-# -----------------------------------------------------------------------------
-
-@app.post("/ask", response_model=AskResponse)
-async def ask(req: AskRequest):
-    """
-    Main endpoint used by Streamlit or any frontend.
-    """
-
-    if not req.question.strip():
-        raise HTTPException(status_code=400, detail="Question cannot be empty")
-
-    if not req.github_username or not req.github_token:
-        raise HTTPException(status_code=400, detail="GitHub username and token required")
-
-    # Inject GitHub token into environment (used by MCP ingestion/tools)
-    os.environ["GITHUB_TOKEN"] = req.github_token
-
-    # Build agent state (matches your AgentState schema)
-    initial_state: Dict[str, Any] = {
-        "question": req.question,
-        "username": req.github_username,
-        "conversation_history": [],
-        "last_repo": None,
-        "last_repo_user": None,
-        "plan": None,
-        "tool_calls": None,
-        "tool_results": None,
-        "final_answer": None,
-    }
-
+# -------------------------------------------------
+# Startup: Test DB / Supabase Connection
+# -------------------------------------------------
+@app.on_event("startup")
+def startup_check():
     try:
-        result = await agent.ainvoke(initial_state)
-        answer = result.get("final_answer", "No answer generated.")
+        db_path = get_db_path("healthcheck")
+        conn = connect(db_path)
+        conn.execute("SELECT 1;")
+        conn.close()
 
-        return AskResponse(answer=answer)
+        LOGGER.info("✅ Database connection successful")
 
     except Exception as e:
+        LOGGER.error(f"❌ Database connection failed: {e}")
+
+
+# -------------------------------------------------
+# Health Route
+# -------------------------------------------------
+@app.get("/")
+def health():
+    return {
+        "status": "CodeSense API is running",
+        "db_mode": os.environ.get("DB_MODE", "sqlite"),
+        "supabase": bool(os.environ.get("DATABASE_URL")),
+    }
+
+
+# -------------------------------------------------
+# Ingest Route
+# -------------------------------------------------
+@app.post("/ingest")
+async def ingest_user(data: IngestRequest):
+    try:
+        os.environ["GITHUB_TOKEN"] = data.github_token
+
+        LOGGER.info(f"Starting ingestion for user={data.username}")
+
+        await ingest(
+            user=data.username,
+            token=data.github_token,
+            max_commits=200,
+        )
+
+        return {"message": "Ingestion completed"}
+
+    except Exception as e:
+        LOGGER.exception("Ingestion failed")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# -----------------------------------------------------------------------------
-# Local Dev Runner (Optional)
-# -----------------------------------------------------------------------------
+# -------------------------------------------------
+# Query Route
+# -------------------------------------------------
+@app.post("/query")
+async def query_user(data: QueryRequest):
+    try:
+        LOGGER.info(f"Query for user={data.username}: {data.question}")
 
-if __name__ == "__main__":
-    import uvicorn
+        initial_state = {
+            "question": data.question,
+            "username": data.username,
+            "conversation_history": [],
+            "last_repo": None,
+            "last_repo_user": None,
+            "tool_name": None,
+            "tool_args": None,
+            "tool_result": None,
+            "final_answer": None,
+        }
 
-    uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=int(os.environ.get("PORT", 8000)),
-        reload=True,
-    )
+        result = await agent.ainvoke(initial_state)
+
+        return {
+            "answer": result.get("final_answer", "No response generated"),
+            "repo": result.get("last_repo"),
+        }
+
+    except Exception as e:
+        LOGGER.exception("Query failed")
+        raise HTTPException(status_code=500, detail=str(e))
