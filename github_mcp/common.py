@@ -6,63 +6,43 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Optional
 
-import psycopg2
-import psycopg2.extras
+try:
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+except ImportError:
+    psycopg2 = None
 
 LOGGER = logging.getLogger("github_mcp")
 logging.basicConfig(level=logging.INFO)
 
-# -------------------------
-# Environment
-# -------------------------
-DB_MODE = os.getenv("DB_MODE", "sqlite").lower()
-DATABASE_URL = os.getenv("DATABASE_URL")
+DB_MODE = os.environ.get("DB_MODE", "sqlite").lower()
+DATABASE_URL = os.environ.get("DATABASE_URL")
 
-DEFAULT_DB_DIR = Path.home() / ".github_mcp"
+SQLITE_PATH = Path(os.environ.get("SQLITE_DB_PATH", "/tmp/github_mcp.db"))
 
+# ============================
+# CONNECTION
+# ============================
 
-# -------------------------
-# Paths (SQLite only)
-# -------------------------
-def ensure_db_dir() -> Path:
-    DEFAULT_DB_DIR.mkdir(parents=True, exist_ok=True)
-    return DEFAULT_DB_DIR
-
-
-def get_db_path(user: str) -> Path:
-    ensure_db_dir()
-    safe = user.strip().replace("/", "_")
-    return DEFAULT_DB_DIR / f"{safe}.db"
-
-
-# -------------------------
-# Connections
-# -------------------------
-def connect(db_path: Optional[Path] = None):
+def connect():
     if DB_MODE == "postgres":
         if not DATABASE_URL:
             raise RuntimeError("DATABASE_URL not set for Postgres mode")
 
         LOGGER.info("Connecting to Supabase Postgres...")
-        return psycopg2.connect(
-            DATABASE_URL,
-            cursor_factory=psycopg2.extras.RealDictCursor,
-            sslmode="require",
-        )
+        return psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
 
-    LOGGER.info("Using local SQLite DB")
-    if not db_path:
-        raise ValueError("db_path required for sqlite mode")
+    else:
+        LOGGER.info("Using local SQLite DB at %s", SQLITE_PATH)
+        conn = sqlite3.connect(SQLITE_PATH, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        return conn
 
-    conn = sqlite3.connect(str(db_path))
-    conn.row_factory = sqlite3.Row
-    return conn
+# ============================
+# SCHEMA
+# ============================
 
-
-# -------------------------
-# Schema
-# -------------------------
-SCHEMA_SQL = r"""
+SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS repos (
     user TEXT NOT NULL,
     repo TEXT NOT NULL,
@@ -130,33 +110,53 @@ CREATE TABLE IF NOT EXISTS repo_signals (
     signals_json TEXT,
     PRIMARY KEY (user, repo)
 );
+
+CREATE INDEX IF NOT EXISTS idx_commits_repo_time
+ON commits(user, repo, authored_at);
+
+CREATE INDEX IF NOT EXISTS idx_repos_pushed_at
+ON repos(user, pushed_at DESC);
 """
 
-
 def init_schema(conn) -> None:
-    cur = conn.cursor()
-    cur.execute(SCHEMA_SQL)
-    conn.commit()
+    LOGGER.info("Initializing database schema...")
 
+    if DB_MODE == "postgres":
+        with conn.cursor() as cur:
+            cur.execute(SCHEMA_SQL)
+        conn.commit()
+    else:
+        conn.executescript(SCHEMA_SQL)
+        conn.commit()
 
-# -------------------------
-# Helpers
-# -------------------------
+# ============================
+# HELPERS
+# ============================
+
 def upsert(conn, sql: str, params: tuple[Any, ...]) -> None:
-    cur = conn.cursor()
-    cur.execute(sql, params)
-    conn.commit()
+    if DB_MODE == "postgres":
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+        conn.commit()
+    else:
+        conn.execute(sql, params)
+        conn.commit()
 
+def fetchall(conn, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
+    if DB_MODE == "postgres":
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+            return cur.fetchall()
+    else:
+        cur = conn.execute(sql, params)
+        return [dict(r) for r in cur.fetchall()]
 
-def fetchall(conn, sql: str, params: tuple[Any, ...] = ()):
-    cur = conn.cursor()
-    cur.execute(sql, params)
-    rows = cur.fetchall()
-    return [dict(r) for r in rows]
-
-
-def fetchone(conn, sql: str, params: tuple[Any, ...] = ()):
-    cur = conn.cursor()
-    cur.execute(sql, params)
-    row = cur.fetchone()
-    return dict(row) if row else None
+def fetchone(conn, sql: str, params: tuple[Any, ...] = ()) -> Optional[dict[str, Any]]:
+    if DB_MODE == "postgres":
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+            return cur.fetchone()
+    else:
+        cur = conn.execute(sql, params)
+        row = cur.fetchone()
+        return dict(row) if row else None
