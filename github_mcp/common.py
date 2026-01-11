@@ -7,17 +7,61 @@ from pathlib import Path
 from typing import Any, Optional
 
 import psycopg2
-from psycopg2.extras import RealDictCursor
+import psycopg2.extras
 
 LOGGER = logging.getLogger("github_mcp")
 logging.basicConfig(level=logging.INFO)
 
-# DB mode: sqlite (local) or postgres (Render/Supabase)
+# -------------------------
+# Environment
+# -------------------------
 DB_MODE = os.getenv("DB_MODE", "sqlite").lower()
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-DEFAULT_DB_DIR = Path(os.environ.get("GITHUB_MCP_DATA_DIR", Path.home() / ".github_mcp"))
+DEFAULT_DB_DIR = Path.home() / ".github_mcp"
 
+
+# -------------------------
+# Paths (SQLite only)
+# -------------------------
+def ensure_db_dir() -> Path:
+    DEFAULT_DB_DIR.mkdir(parents=True, exist_ok=True)
+    return DEFAULT_DB_DIR
+
+
+def get_db_path(user: str) -> Path:
+    ensure_db_dir()
+    safe = user.strip().replace("/", "_")
+    return DEFAULT_DB_DIR / f"{safe}.db"
+
+
+# -------------------------
+# Connections
+# -------------------------
+def connect(db_path: Optional[Path] = None):
+    if DB_MODE == "postgres":
+        if not DATABASE_URL:
+            raise RuntimeError("DATABASE_URL not set for Postgres mode")
+
+        LOGGER.info("Connecting to Supabase Postgres...")
+        return psycopg2.connect(
+            DATABASE_URL,
+            cursor_factory=psycopg2.extras.RealDictCursor,
+            sslmode="require",
+        )
+
+    LOGGER.info("Using local SQLite DB")
+    if not db_path:
+        raise ValueError("db_path required for sqlite mode")
+
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+# -------------------------
+# Schema
+# -------------------------
 SCHEMA_SQL = r"""
 CREATE TABLE IF NOT EXISTS repos (
     user TEXT NOT NULL,
@@ -89,46 +133,16 @@ CREATE TABLE IF NOT EXISTS repo_signals (
 """
 
 
-def ensure_db_dir() -> Path:
-    DEFAULT_DB_DIR.mkdir(parents=True, exist_ok=True)
-    return DEFAULT_DB_DIR
-
-
-def get_db_path(user: str) -> Path:
-    ensure_db_dir()
-    safe = user.strip().replace("/", "_")
-    return DEFAULT_DB_DIR / f"{safe}.db"
-
-
-def connect(user: Optional[str] = None):
-    """
-    Returns either:
-    - sqlite3 connection (local)
-    - psycopg2 connection (Supabase/Postgres)
-    """
-    if DB_MODE == "postgres":
-        if not DATABASE_URL:
-            raise RuntimeError("DATABASE_URL not set for Postgres mode")
-
-        conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
-        return conn
-
-    # Default: SQLite
-    db_path = get_db_path(user or "default")
-    conn = sqlite3.connect(str(db_path))
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
-def init_schema(conn):
+def init_schema(conn) -> None:
     cur = conn.cursor()
-    for stmt in SCHEMA_SQL.split(";"):
-        if stmt.strip():
-            cur.execute(stmt)
+    cur.execute(SCHEMA_SQL)
     conn.commit()
 
 
-def upsert(conn, sql: str, params: tuple[Any, ...]):
+# -------------------------
+# Helpers
+# -------------------------
+def upsert(conn, sql: str, params: tuple[Any, ...]) -> None:
     cur = conn.cursor()
     cur.execute(sql, params)
     conn.commit()
@@ -137,11 +151,12 @@ def upsert(conn, sql: str, params: tuple[Any, ...]):
 def fetchall(conn, sql: str, params: tuple[Any, ...] = ()):
     cur = conn.cursor()
     cur.execute(sql, params)
-    return cur.fetchall()
+    rows = cur.fetchall()
+    return [dict(r) for r in rows]
 
 
 def fetchone(conn, sql: str, params: tuple[Any, ...] = ()):
     cur = conn.cursor()
     cur.execute(sql, params)
     row = cur.fetchone()
-    return row
+    return dict(row) if row else None
