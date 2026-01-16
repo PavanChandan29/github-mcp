@@ -295,22 +295,22 @@ def detect_signals(paths: list[str]) -> dict[str, Any]:
     automation_score = round((sum(automation_items) / len(automation_items)) * 100, 1)
 
     return {
-        "has_tests": int(has_tests),
-        "has_github_actions": int(has_actions),
-        "has_ci_config": int(has_ci),
-        "has_lint_config": int(has_lint),
-        "has_precommit": int(has_precommit),
-        "has_dockerfile": int(has_dockerfile),
-        "has_docker_compose": int(has_docker_compose),
-        "has_makefile": int(has_makefile),
-        "has_code_of_conduct": int(has_code_of_conduct),
-        "has_contributing": int(has_contributing),
-        "has_license": int(has_license),
-        "has_security_policy": int(has_security_policy),
-        "has_issue_templates": int(has_issue_templates),
-        "has_pr_templates": int(has_pr_templates),
-        "has_changelog": int(has_changelog),
-        "has_docs": int(has_docs),
+        "has_tests": has_tests,  # FIXED: Return bool, not int
+        "has_github_actions": has_actions,
+        "has_ci_config": has_ci,
+        "has_lint_config": has_lint,
+        "has_precommit": has_precommit,
+        "has_dockerfile": has_dockerfile,
+        "has_docker_compose": has_docker_compose,
+        "has_makefile": has_makefile,
+        "has_code_of_conduct": has_code_of_conduct,
+        "has_contributing": has_contributing,
+        "has_license": has_license,
+        "has_security_policy": has_security_policy,
+        "has_issue_templates": has_issue_templates,
+        "has_pr_templates": has_pr_templates,
+        "has_changelog": has_changelog,
+        "has_docs": has_docs,
         "detected_test_framework": detected_test_framework,  # FIXED: removed json.dumps({})
         "detected_ci": detected_ci,  # FIXED: removed json.dumps({})
         "organization_score": organization_score,
@@ -440,9 +440,9 @@ async def ingest(user_name: str, token: str, max_commits: int) -> None:
             else:
                 license_name = None
 
-            # Boolean flags
-            is_archived = 1 if r.get("archived", False) else 0
-            is_fork = 1 if r.get("fork", False) else 0
+            # FIXED: Boolean flags - PostgreSQL needs True/False, not 1/0
+            is_archived = bool(r.get("archived", False))
+            is_fork = bool(r.get("fork", False))
 
             readme_text = await fetch_readme(user_name, repo, token, default_branch)
 
