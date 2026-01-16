@@ -14,7 +14,7 @@ except:
 # =========================
 # Mode Configuration
 # =========================
-DEPLOY_MODE = os.getenv("DEPLOY_MODE", "local")  # local | cloud
+DEPLOY_MODE = os.getenv("DEPLOY_MODE", "cloud")  # local | cloud
 API_BASE = os.getenv("API_BASE", "http://44.198.180.55:8000")  # EC2 API
 
 
@@ -51,7 +51,7 @@ textarea, input { background-color: #ffffff !important; color: #1f2328 !importan
 # =========================
 defaults = {
     "messages": [],
-    "git_username": "",
+    "git_user_name": "",
     "git_token": "",
     "show_settings": False,
     "settings_saved": False,
@@ -81,14 +81,14 @@ with st.container():
 if st.session_state.show_settings:
     with st.expander("Settings", expanded=True):
 
-        git_username = st.text_input("GitHub Username", value=st.session_state.git_username)
+        git_user_name = st.text_input("GitHub Username", value=st.session_state.git_user_name)
         git_token = st.text_input("GitHub Token", value=st.session_state.git_token, type="password")
 
         col_reset, col_ok = st.columns(2)
 
         with col_reset:
             if st.button("Reset"):
-                st.session_state.git_username = ""
+                st.session_state.git_user_name = ""
                 st.session_state.git_token = ""
                 st.session_state.settings_saved = False
                 st.session_state.ingested = False
@@ -96,8 +96,8 @@ if st.session_state.show_settings:
 
         with col_ok:
             if st.button("OK", disabled=st.session_state.settings_saved):
-                if git_username and git_token:
-                    st.session_state.git_username = git_username
+                if git_user_name and git_token:
+                    st.session_state.git_user_name = git_user_name
                     st.session_state.git_token = git_token
                     st.session_state.settings_saved = True
                     st.success("Settings saved!")
@@ -110,7 +110,7 @@ if st.session_state.show_settings:
 # Helpers
 # =========================
 def has_credentials():
-    return bool(st.session_state.git_username and st.session_state.git_token)
+    return bool(st.session_state.git_user_name and st.session_state.git_token)
 
 
 def call_cloud_ingest():
@@ -118,15 +118,18 @@ def call_cloud_ingest():
         r = requests.post(
             f"{API_BASE}/ingest",
             json={
-                "username": st.session_state.git_username,
+                "user_name": st.session_state.git_user_name,  # ✅ FIXED
                 "github_token": st.session_state.git_token
             },
             timeout=120
         )
+
         if r.status_code == 200:
             st.session_state.ingested = True
+            st.success("Ingestion started in background.")
         else:
-            st.error("Ingestion failed.")
+            st.error(f"Ingestion failed: {r.text}")
+
     except Exception as e:
         st.error(f"API ingest error: {e}")
 
@@ -136,7 +139,7 @@ def call_cloud_query(prompt):
         r = requests.post(
             f"{API_BASE}/query",
             json={
-                "username": st.session_state.git_username,
+                "user_name": st.session_state.git_user_name,  # ✅ FIXED
                 "question": prompt
             },
             timeout=120
@@ -156,7 +159,7 @@ def call_local_agent(prompt):
 
     initial_state = {
         "question": prompt,
-        "username": st.session_state.git_username,
+        "username": st.session_state.git_user_name,
         "conversation_history": conversation_history,
         "last_repo": st.session_state.last_repo,
         "last_repo_user": st.session_state.last_repo_user,
