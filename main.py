@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import os
 import logging
-from fastapi import FastAPI, HTTPException
+import asyncio
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 
-from github_mcp.common import connect, init_schema
+from github_mcp.common import connect
 from github_mcp.ingest import ingest
 from github_agent.agent import agent
-
-import asyncio
+from github_mcp.user_service import upsert_user
 
 # -------------------------------------------------
 # Logging
@@ -42,9 +42,14 @@ class QueryRequest(BaseModel):
 def startup_check():
     try:
         conn = connect()
-        conn.execute("SELECT 1;")
-        conn.close()
 
+        if os.environ.get("DB_MODE") == "postgres":
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1;")
+        else:
+            conn.execute("SELECT 1;")
+
+        conn.close()
         LOGGER.info("✅ Database connection successful")
 
     except Exception as e:
@@ -64,30 +69,95 @@ def health():
 
 
 # -------------------------------------------------
-# Ingest Route
+# Background Ingestion Worker
 # -------------------------------------------------
-@app.post("/ingest")
-async def ingest_user(data: IngestRequest):
+def run_ingestion_job(username: str, token: str):
     try:
-        os.environ["GITHUB_TOKEN"] = data.github_token
+        os.environ["GITHUB_TOKEN"] = token
 
-        LOGGER.info(f"Starting ingestion for user={data.username}")
-
-        await ingest(
-            user=data.username,
-            token=data.github_token,
-            max_commits=200,
+        asyncio.run(
+            ingest(
+                user=username,
+                token=token,
+                max_commits=200,
+            )
         )
 
-        return {"message": "Ingestion completed"}
+    except Exception as e:
+        LOGGER.exception(f"Ingestion failed for {username}")
+        upsert_user(
+            user_name=username,
+            status="failed",
+            repo_count=0,
+            error=str(e),
+        )
+
+
+# -------------------------------------------------
+# Ingest Route (Non-Blocking)
+# -------------------------------------------------
+@app.post("/ingest")
+async def ingest_user(data: IngestRequest, background_tasks: BackgroundTasks):
+    try:
+        LOGGER.info(f"Starting background ingestion for user={data.username}")
+
+        # Mark as in-progress
+        upsert_user(
+            user_name=data.username,
+            status="in_progress",
+            repo_count=0,
+            error=None,
+        )
+
+        background_tasks.add_task(
+            run_ingestion_job,
+            data.username,
+            data.github_token,
+        )
+
+        return {
+            "status": "started",
+            "message": f"Ingestion started for {data.username}",
+        }
 
     except Exception as e:
-        LOGGER.exception("Ingestion failed")
+        LOGGER.exception("Failed to start ingestion")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 # -------------------------------------------------
-# Query Route
+# User Status Route
+# -------------------------------------------------
+@app.get("/users/{username}")
+def get_user_status(username: str):
+    try:
+        conn = connect()
+
+        if os.environ.get("DB_MODE") == "postgres":
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT * FROM users WHERE username = %s",
+                    (username,),
+                )
+                user = cur.fetchone()
+        else:
+            cur = conn.execute(
+                "SELECT * FROM users WHERE username = ?",
+                (username,),
+            )
+            user = cur.fetchone()
+            user = dict(user) if user else None
+
+        conn.close()
+        return user or {"status": "not_found"}
+
+    except Exception as e:
+        LOGGER.exception("Failed to fetch user status")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# -------------------------------------------------
+# Query Route (Instant)
 # -------------------------------------------------
 @app.post("/query")
 async def query_user(data: QueryRequest):
