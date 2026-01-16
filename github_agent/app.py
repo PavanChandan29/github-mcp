@@ -124,7 +124,7 @@ def call_cloud_ingest():
             timeout=120
         )
 
-        if r.status_code == 200:
+        if r.status_code in [200,202]:
             st.session_state.ingested = True
             st.success("Ingestion started in background.")
         else:

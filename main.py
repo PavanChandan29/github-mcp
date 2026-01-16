@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import logging
 import asyncio
 from fastapi import FastAPI, HTTPException
@@ -13,13 +14,16 @@ from github_agent.agent import agent
 from github_mcp.user_service import upsert_user
 
 # -------------------------------------------------
-# Logging
+# Force real-time logging (important for EC2)
 # -------------------------------------------------
+sys.stdout.reconfigure(line_buffering=True)
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     force=True,
 )
+
 LOGGER = logging.getLogger("BitofGit_API")
 
 # -------------------------------------------------
@@ -86,19 +90,34 @@ def health():
 # Background Ingestion Worker (THREAD SAFE)
 # -------------------------------------------------
 def run_ingestion_job(user_name: str, token: str):
-    try:
-        print(f"🔥 Ingestion thread started for {user_name}", flush=True)
-        LOGGER.info(f"Starting ingestion job for {user_name}")
+    """
+    This runs in a background thread.
+    We MUST force Postgres here because env vars
+    are not inherited reliably across threads.
+    """
 
+    try:
+        # Force Postgres mode
+        os.environ["DB_MODE"] = "postgres"
+        os.environ["DATABASE_URL"] = os.getenv("DATABASE_URL")
         os.environ["GITHUB_TOKEN"] = token
 
-        asyncio.run(
+        LOGGER.info(f"🔥 Ingestion thread started for {user_name}")
+        LOGGER.info(f"🧠 DB_MODE inside thread = {os.environ.get('DB_MODE')}")
+
+        # Create a fresh event loop for this thread
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        loop.run_until_complete(
             ingest(
                 user=user_name,
                 token=token,
                 max_commits=200,
             )
         )
+
+        loop.close()
 
         LOGGER.info(f"✅ Ingestion completed for {user_name}")
 
@@ -111,6 +130,7 @@ def run_ingestion_job(user_name: str, token: str):
 
     except Exception as e:
         LOGGER.exception(f"❌ Ingestion failed for {user_name}")
+
         upsert_user(
             user_name=user_name,
             status="failed",
@@ -120,7 +140,7 @@ def run_ingestion_job(user_name: str, token: str):
 
 
 # -------------------------------------------------
-# Ingest Route (Non-Blocking + Reliable)
+# Ingest Route (Non-Blocking)
 # -------------------------------------------------
 @app.post("/ingest")
 async def ingest_user(data: IngestRequest):
@@ -134,7 +154,6 @@ async def ingest_user(data: IngestRequest):
             error=None,
         )
 
-        # Force background execution via thread
         loop = asyncio.get_running_loop()
         loop.run_in_executor(
             executor,
