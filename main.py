@@ -1,7 +1,6 @@
+from __future__ import annotations
 from dotenv import load_dotenv
 load_dotenv("secrets.env",override=False)
-
-from __future__ import annotations
 
 import os
 import sys
