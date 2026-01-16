@@ -92,8 +92,7 @@ def health():
 def run_ingestion_job(user_name: str, token: str):
     """
     This runs in a background thread.
-    We MUST force Postgres here because env vars
-    are not inherited reliably across threads.
+    The ingest() function handles all status updates internally.
     """
 
     try:
@@ -109,6 +108,8 @@ def run_ingestion_job(user_name: str, token: str):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
+        # FIXED: Let ingest() handle all status updates
+        # It will mark as "in_progress" at start and "completed"/"failed" at end
         loop.run_until_complete(
             ingest(
                 user_name,
@@ -121,22 +122,23 @@ def run_ingestion_job(user_name: str, token: str):
 
         LOGGER.info(f"✅ Ingestion completed for {user_name}")
 
-        upsert_user(
-            user_name=user_name,
-            status="completed",
-            repo_count=0,
-            error=None,
-        )
+        # REMOVED: Duplicate status update
+        # The ingest() function already updated status to "completed"
 
     except Exception as e:
         LOGGER.exception(f"❌ Ingestion failed for {user_name}")
 
-        upsert_user(
-            user_name=user_name,
-            status="failed",
-            repo_count=0,
-            error=str(e),
-        )
+        # OPTIONAL: Only update if ingest() didn't catch it
+        # In practice, ingest() handles this, so this is a safety net
+        try:
+            upsert_user(
+                user_name=user_name,
+                status="failed",
+                repo_count=0,
+                error=str(e),
+            )
+        except Exception as inner_e:
+            LOGGER.error(f"Failed to update error status: {inner_e}")
 
 
 # -------------------------------------------------
@@ -147,9 +149,11 @@ async def ingest_user(data: IngestRequest):
     try:
         LOGGER.info(f"🚀 Ingest API hit for user={data.user_name}")
 
+        # FIXED: Only mark as pending here
+        # The ingest() function will change it to "in_progress" when it actually starts
         upsert_user(
             user_name=data.user_name,
-            status="in_progress",
+            status="pending",
             repo_count=0,
             error=None,
         )
@@ -163,8 +167,8 @@ async def ingest_user(data: IngestRequest):
         )
 
         return {
-            "status": "started",
-            "message": f"Ingestion started for {data.user_name}",
+            "status": "pending",
+            "message": f"Ingestion queued for {data.user_name}",
         }
 
     except Exception as e:
