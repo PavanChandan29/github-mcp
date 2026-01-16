@@ -111,9 +111,9 @@ def run_ingestion_job(user_name: str, token: str):
 
         loop.run_until_complete(
             ingest(
-                user=user_name,
-                token=token,
-                max_commits=200,
+                user_name,
+                token,
+                200,
             )
         )
 
