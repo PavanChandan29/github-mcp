@@ -18,6 +18,8 @@ logging.basicConfig(level=logging.INFO)
 # =========================
 # ENV HELPERS (DYNAMIC)
 # =========================
+def connect():
+    print("CONNECT DB_MODE:", os.environ.get("DB_MODE"))
 
 def get_db_mode() -> str:
     return os.environ.get("DB_MODE", "postgres").lower()

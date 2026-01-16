@@ -1,3 +1,6 @@
+from dotenv import load_dotenv
+load_dotenv("secrets.env",override=False)
+
 from __future__ import annotations
 
 import os
@@ -12,12 +15,8 @@ from github_mcp.common import connect
 from github_mcp.ingest import ingest
 from github_agent.agent import agent
 from github_mcp.user_service import upsert_user
-from dotenv import load_dotenv
 
-load_dotenv("secrets.env",override=False)
 os.environ.setdefault("DB_MODE", "postgres")
-
-
 # -------------------------------------------------
 # Force real-time logging (important for EC2)wh
 # -------------------------------------------------
