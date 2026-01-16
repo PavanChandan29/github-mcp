@@ -15,17 +15,15 @@ except ImportError:
 LOGGER = logging.getLogger("github_mcp")
 logging.basicConfig(level=logging.INFO)
 
-# =========================
-# ENV HELPERS (DYNAMIC)
-# =========================
-def connect():
-    print("CONNECT DB_MODE:", os.environ.get("DB_MODE"))
-
 def get_db_mode() -> str:
     return os.environ.get("DB_MODE", "postgres").lower()
 
 def get_database_url() -> Optional[str]:
     return os.environ.get("DATABASE_URL")
+
+# =========================
+# ENV HELPERS (DYNAMIC)
+# =========================
 
 SQLITE_PATH = Path(os.environ.get("SQLITE_DB_PATH", "github_mcp.db"))
 
@@ -61,10 +59,9 @@ def connect():
         LOGGER.info("Connecting to Supabase Postgres...")
         return psycopg2.connect(database_url, cursor_factory=RealDictCursor)
 
-    # SQLite fallback (local dev only)
     SQLITE_PATH.parent.mkdir(parents=True, exist_ok=True)
-
     LOGGER.warning("⚠️ Using local SQLite DB at %s", SQLITE_PATH)
+
     conn = sqlite3.connect(SQLITE_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn

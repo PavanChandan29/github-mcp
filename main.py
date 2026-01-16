@@ -15,8 +15,9 @@ from github_mcp.ingest import ingest
 from github_agent.agent import agent
 from github_mcp.user_service import upsert_user
 
-if os.getenv("ENV") == "prod":
-    os.environ.setdefault("DB_MODE", "postgres")
+
+os.environ["DB_MODE"] = "postgres"
+os.environ["DATABASE_URL"] = os.getenv("DATABASE_URL")
 
 # -------------------------------------------------
 # Force real-time logging (important for EC2)wh
