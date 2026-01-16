@@ -21,10 +21,12 @@ _secrets_path = Path(__file__).parent / "secrets.env"
 if _secrets_path.exists():
     load_dotenv(_secrets_path)
 
+
 def load_config() -> dict:
     config_path = Path(__file__).resolve().parents[1] / "config" / "ingest.yaml"
     with open(config_path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
+
 
 def _headers(token: str) -> dict[str, str]:
     return {
@@ -101,21 +103,22 @@ async def list_tree(user_name: str, repo: str, token: str, default_branch: str) 
 
 def detect_signals(paths: list[str]) -> dict[str, Any]:
     lower = [p.lower() for p in paths]
-    
+
     def has_any(prefixes: list[str]) -> bool:
         return any(any(p.startswith(pref) for pref in prefixes) for p in lower)
-    
+
     # Test detection
     has_tests = any(
-        p.startswith(("test/", "tests/", "__tests__/", "spec/")) or 
+        p.startswith(("test/", "tests/", "__tests__/", "spec/")) or
         p.endswith(("_test.py", ".spec.ts", ".test.ts", ".test.js", ".test.py", "_spec.rb", ".spec.rb"))
         for p in lower
     )
-    
+
     # CI/CD detection
     has_actions = any(p.startswith(".github/workflows/") for p in lower)
-    has_ci = has_actions or any(p.startswith((".circleci/", ".gitlab-ci", "azure-pipelines", "jenkinsfile")) for p in lower)
-    
+    has_ci = has_actions or any(
+        p.startswith((".circleci/", ".gitlab-ci", "azure-pipelines", "jenkinsfile")) for p in lower)
+
     # Linting and code quality
     lint_files = {
         ".ruff.toml", "ruff.toml", "pyproject.toml", ".flake8", "setup.cfg", ".pylintrc",
@@ -124,23 +127,25 @@ def detect_signals(paths: list[str]) -> dict[str, Any]:
         ".stylelintrc", ".editorconfig", ".clang-format",
     }
     has_lint = any(p in lint_files or p.endswith(".eslintrc.js") or p.endswith(".prettierrc.json") for p in lower)
-    
+
     # Automation and tooling
     has_precommit = any(p == ".pre-commit-config.yaml" for p in lower)
     has_dockerfile = any(p.endswith("dockerfile") or p == "dockerfile" for p in lower)
     has_docker_compose = any(p.endswith("docker-compose.yml") or p.endswith("docker-compose.yaml") for p in lower)
     has_makefile = any(p == "makefile" for p in lower)
-    
+
     # Documentation and organization
-    has_code_of_conduct = any(p in ("code_of_conduct.md", "code-of-conduct.md", ".github/code_of_conduct.md") for p in lower)
+    has_code_of_conduct = any(
+        p in ("code_of_conduct.md", "code-of-conduct.md", ".github/code_of_conduct.md") for p in lower)
     has_contributing = any(p in ("contributing.md", "contributing.rst", ".github/contributing.md") for p in lower)
     has_license = any(p.startswith("license") or p.startswith("licence") for p in lower)
     has_security_policy = any(p in (".github/security.md", "security.md", "security.rst") for p in lower)
     has_issue_templates = any(p.startswith(".github/issue_template") or ".github/ISSUE_TEMPLATE" in p for p in lower)
-    has_pr_templates = any(p.startswith(".github/pull_request_template") or ".github/PULL_REQUEST_TEMPLATE" in p for p in lower)
+    has_pr_templates = any(
+        p.startswith(".github/pull_request_template") or ".github/PULL_REQUEST_TEMPLATE" in p for p in lower)
     has_changelog = any(p.startswith(("changelog", "changes", "history")) for p in lower)
     has_docs = any(p.startswith(("docs/", "documentation/")) for p in lower)
-    
+
     # Tech stack detection (from file extensions and configs)
     tech_stack = set()
     for p in lower:
@@ -246,7 +251,7 @@ def detect_signals(paths: list[str]) -> dict[str, Any]:
             tech_stack.add("Serverless")
         elif ".github/workflows" in p:
             tech_stack.add("GitHub Actions")
-    
+
     # Test framework detection
     detected_test_framework = None
     if any(p.endswith("pytest.ini") or p.endswith("conftest.py") or p.endswith("pytest.ini") for p in lower):
@@ -259,7 +264,7 @@ def detect_signals(paths: list[str]) -> dict[str, Any]:
         detected_test_framework = "mocha"
     elif any(p.endswith(("spec_helper.rb", "test_helper.rb")) for p in lower):
         detected_test_framework = "rspec"
-    
+
     # CI/CD detection
     detected_ci = None
     if has_actions:
@@ -274,7 +279,7 @@ def detect_signals(paths: list[str]) -> dict[str, Any]:
         detected_ci = "jenkins"
     elif any("travis.yml" in p for p in lower):
         detected_ci = "travis"
-    
+
     # Calculate scores (0-100 scale)
     organization_items = [
         has_code_of_conduct, has_contributing, has_license, has_security_policy,
@@ -282,13 +287,13 @@ def detect_signals(paths: list[str]) -> dict[str, Any]:
         has_readme := any(p.startswith("readme") for p in lower)
     ]
     organization_score = round((sum(organization_items) / len(organization_items)) * 100, 1)
-    
+
     coding_standards_items = [has_tests, has_lint, has_precommit, has_ci]
     coding_standards_score = round((sum(coding_standards_items) / len(coding_standards_items)) * 100, 1)
-    
+
     automation_items = [has_actions, has_ci, has_precommit, has_dockerfile, has_docker_compose]
     automation_score = round((sum(automation_items) / len(automation_items)) * 100, 1)
-    
+
     return {
         "has_tests": int(has_tests),
         "has_github_actions": int(has_actions),
@@ -306,12 +311,12 @@ def detect_signals(paths: list[str]) -> dict[str, Any]:
         "has_pr_templates": int(has_pr_templates),
         "has_changelog": int(has_changelog),
         "has_docs": int(has_docs),
-        "detected_test_framework": detected_test_framework or "",
-        "detected_ci": detected_ci or "",
+        "detected_test_framework": detected_test_framework,  # FIXED: removed json.dumps({})
+        "detected_ci": detected_ci,  # FIXED: removed json.dumps({})
         "organization_score": organization_score,
         "coding_standards_score": coding_standards_score,
         "automation_score": automation_score,
-        "tech_stack": ", ".join(sorted(tech_stack)) if tech_stack else "",
+        "tech_stack": ", ".join(sorted(tech_stack)) if tech_stack else None,  # FIXED: changed to None
         "signals_json": {
             "total_paths": len(paths),
             "sample_paths": paths[:50],
@@ -344,6 +349,7 @@ async def fetch_commit_details(user_name: str, repo: str, sha: str, token: str) 
     async with httpx.AsyncClient() as client:
         return await _get_json(client, f"{GITHUB_API}/repos/{user_name}/{repo}/commits/{sha}", token)
 
+
 async def fetch_file_content(user_name: str, repo: str, path: str, token: str, ref: str) -> str:
     raw_url = f"https://raw.githubusercontent.com/{user_name}/{repo}/{ref}/{path}"
 
@@ -351,6 +357,7 @@ async def fetch_file_content(user_name: str, repo: str, path: str, token: str, r
         resp = await client.get(raw_url, headers=_headers(token), timeout=60.0)
         resp.raise_for_status()
         return resp.text
+
 
 async def repo_text_files(user_name: str, repo: str, token: str, default_branch: str):
     paths = await list_tree(user_name, repo, token, default_branch)
@@ -360,7 +367,7 @@ async def repo_text_files(user_name: str, repo: str, token: str, default_branch:
     text_files = [
         p for p in paths
         if p.lower().endswith(target_exts)
-        and not p.lower().startswith(".git/")
+           and not p.lower().startswith(".git/")
     ]
 
     LOGGER.info("Found %d text files in %s/%s", len(text_files), user_name, repo)
@@ -381,6 +388,7 @@ async def repo_text_files(user_name: str, repo: str, token: str, default_branch:
             LOGGER.warning("Failed to fetch %s in %s/%s: %s", path, user_name, repo, e)
 
     return results
+
 
 def _iso(dt: Optional[str]) -> str:
     if not dt:
@@ -404,19 +412,35 @@ async def ingest(user_name: str, token: str, max_commits: int) -> None:
         for r in repos:
             repo = r["name"]
             default_branch = r.get("default_branch") or "main"
-            description = r.get("description") or ""
-            language = r.get("language") or ""
-            html_url = r.get("html_url") or ""
-            pushed_at = r.get("pushed_at") or ""
-            created_at = r.get("created_at") or ""
-            updated_at = r.get("updated_at") or ""
+
+            # FIXED: TEXT fields - use None for null values
+            description = r.get("description") or None
+            language = r.get("language") or None
+            html_url = r.get("html_url") or None
+
+            # FIXED: Timestamp fields - use None for null values
+            pushed_at = r.get("pushed_at") or None
+            created_at = r.get("created_at") or None
+            updated_at = r.get("updated_at") or None
+
+            # Numeric fields with defaults
             stargazers_count = r.get("stargazers_count", 0)
             forks_count = r.get("forks_count", 0)
             watchers_count = r.get("watchers_count", 0)
             open_issues_count = r.get("open_issues_count", 0)
             size = r.get("size", 0)
-            topics = json.dumps(r.get("topics", [])) if r.get("topics") else ""
-            license_name = r.get("license", {}).get("name", "") if r.get("license") else ""
+
+            # FIXED: JSON fields - proper handling
+            topics = json.dumps(r.get("topics", []))
+
+            # FIXED: License handling - handle nested structure properly
+            license_obj = r.get("license")
+            if license_obj and license_obj.get("name"):
+                license_name = license_obj["name"]
+            else:
+                license_name = None
+
+            # Boolean flags
             is_archived = 1 if r.get("archived", False) else 0
             is_fork = 1 if r.get("fork", False) else 0
 
@@ -510,13 +534,14 @@ async def ingest(user_name: str, token: str, max_commits: int) -> None:
                     (
                         user_name, repo,
                         sig["has_tests"], sig["has_github_actions"], sig["has_ci_config"], sig["has_lint_config"],
-                        sig["has_precommit"], sig["has_dockerfile"], sig.get("has_docker_compose", 0), sig["has_makefile"],
+                        sig["has_precommit"], sig["has_dockerfile"], sig.get("has_docker_compose", 0),
+                        sig["has_makefile"],
                         sig["detected_test_framework"], sig["detected_ci"],
                         sig["has_code_of_conduct"], sig["has_contributing"], sig["has_license"],
                         sig["has_security_policy"], sig["has_issue_templates"], sig["has_pr_templates"],
                         sig["has_changelog"], sig["has_docs"],
                         sig["organization_score"], sig["coding_standards_score"], sig["automation_score"],
-                        sig["tech_stack"], json.dumps(sig["signals_json"]),
+                        sig["tech_stack"], json.dumps(sig["signals_json"] or {}),
                     ),
                 )
 
@@ -561,10 +586,16 @@ async def ingest(user_name: str, token: str, max_commits: int) -> None:
                     details = await fetch_commit_details(user_name, repo, sha, token)
 
                     commit_obj = details.get("commit", {})
-                    authored_at = commit_obj.get("author", {}).get("date", "")
-                    message = commit_obj.get("message", "")
-                    author_name = commit_obj.get("author", {}).get("name", "")
-                    author_login = (details.get("author") or {}).get("login", "") if details.get("author") else ""
+
+                    # FIXED: Use None for null values instead of json.dumps({})
+                    authored_at = commit_obj.get("author", {}).get("date") or None
+                    message = commit_obj.get("message") or None
+                    author_name = commit_obj.get("author", {}).get("name") or None
+
+                    # FIXED: Handle nested author object properly
+                    author_details = details.get("author")
+                    author_login = author_details.get("login") if author_details else None
+
                     files = details.get("files") or []
                     additions = details.get("stats", {}).get("additions", 0)
                     deletions = details.get("stats", {}).get("deletions", 0)
