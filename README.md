@@ -1,6 +1,6 @@
-# CodeSense – Intelligent GitHub Profile Analyzer
+# BitofGit – Intelligent GitHub Profile Analyzer
 
-RepoSense is an **AI-powered GitHub analysis system** that ingests a user’s public repositories into a **local knowledge base** and allows LLM agents to reason over that data using **structured MCP tools**.
+BitofGit is an **AI-powered GitHub analysis system** that ingests a user’s public repositories into a **local knowledge base** and allows LLM agents to reason over that data using **structured MCP tools**.
 
 This project was built as a **learning-focused system design exercise** to understand:
 
@@ -62,7 +62,7 @@ MCP turns GitHub from an API into a **local intelligence system**.
 
 ## System Architecture (High Level)
 
-RepoSense is split into **three clean layers**:
+BitofGit is split into **three clean layers**:
 
 ### 1. Ingestion Layer  
 Fetches and stores GitHub data once.
@@ -140,7 +140,7 @@ This project helped me think more like a **platform engineer** than just a promp
 
 ---
 
-## Example Questions RepoSense Can Answer
+## Example Questions BitofGit Can Answer
 
 - How many of my projects use Python?  
 - Which repos have CI/CD configured?  
@@ -162,7 +162,7 @@ Most “GitHub AI bots”:
 - Guess tech stacks  
 - Can’t reason across repos  
 
-RepoSense:
+BitofGit:
 
 - Uses a **local knowledge base**  
 - Uses **structured tools**  
