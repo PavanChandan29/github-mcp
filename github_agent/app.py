@@ -5,7 +5,7 @@ import requests
 
 # Try importing local agent (only works in local mode)
 try:
-    from agent import agent, CONFIG
+    from agent import agent
     LOCAL_AGENT_AVAILABLE = True
 except:
     LOCAL_AGENT_AVAILABLE = False
@@ -15,12 +15,14 @@ except:
 # Mode Configuration
 # =========================
 DEPLOY_MODE = os.getenv("DEPLOY_MODE", "local")  # local | cloud
-API_BASE = os.getenv("API_BASE", "")
+API_BASE = os.getenv("API_BASE", "http://44.198.180.55:8000")  # EC2 API
+
 
 # =========================
 # Page Config
 # =========================
-st.set_page_config(page_title="CodeSense", layout="wide")
+st.set_page_config(page_title="BitofGit", layout="wide")
+
 
 # =========================
 # Theme
@@ -43,20 +45,25 @@ textarea, input { background-color: #ffffff !important; color: #1f2328 !importan
 </style>
 """, unsafe_allow_html=True)
 
+
 # =========================
 # Session State
 # =========================
-for key, default in {
+defaults = {
     "messages": [],
     "git_username": "",
     "git_token": "",
     "show_settings": False,
     "settings_saved": False,
+    "ingested": False,
     "last_repo": None,
     "last_repo_user": None,
-}.items():
+}
+
+for key, val in defaults.items():
     if key not in st.session_state:
-        st.session_state[key] = default
+        st.session_state[key] = val
+
 
 # =========================
 # Settings Button
@@ -66,6 +73,7 @@ with st.container():
     with col1:
         if st.button("⚙️", help="Settings"):
             st.session_state.show_settings = not st.session_state.show_settings
+
 
 # =========================
 # Settings Panel
@@ -83,6 +91,7 @@ if st.session_state.show_settings:
                 st.session_state.git_username = ""
                 st.session_state.git_token = ""
                 st.session_state.settings_saved = False
+                st.session_state.ingested = False
                 st.rerun()
 
         with col_ok:
@@ -96,32 +105,46 @@ if st.session_state.show_settings:
                 else:
                     st.info("Please fill in both fields")
 
+
 # =========================
 # Helpers
 # =========================
 def has_credentials():
     return bool(st.session_state.git_username and st.session_state.git_token)
 
+
 def call_cloud_ingest():
-    requests.post(
-        f"{API_BASE}/ingest",
-        json={
-            "username": st.session_state.git_username,
-            "github_token": st.session_state.git_token
-        },
-        timeout=60
-    )
+    try:
+        r = requests.post(
+            f"{API_BASE}/ingest",
+            json={
+                "username": st.session_state.git_username,
+                "github_token": st.session_state.git_token
+            },
+            timeout=120
+        )
+        if r.status_code == 200:
+            st.session_state.ingested = True
+        else:
+            st.error("Ingestion failed.")
+    except Exception as e:
+        st.error(f"API ingest error: {e}")
+
 
 def call_cloud_query(prompt):
-    res = requests.post(
-        f"{API_BASE}/query",
-        json={
-            "username": st.session_state.git_username,
-            "question": prompt
-        },
-        timeout=60
-    )
-    return res.json().get("answer", "No response")
+    try:
+        r = requests.post(
+            f"{API_BASE}/query",
+            json={
+                "username": st.session_state.git_username,
+                "question": prompt
+            },
+            timeout=120
+        )
+        return r.json().get("answer", "No response")
+    except Exception as e:
+        return f"API query error: {e}"
+
 
 def call_local_agent(prompt):
     os.environ["GITHUB_TOKEN"] = st.session_state.git_token
@@ -155,7 +178,8 @@ def call_local_agent(prompt):
 # =========================
 # Title
 # =========================
-st.markdown("<h1>CodeSense 🤖</h1>", unsafe_allow_html=True)
+st.markdown("<h1>BitofGit 🤖</h1>", unsafe_allow_html=True)
+
 
 # =========================
 # Chat History
@@ -164,6 +188,7 @@ for message in st.session_state.messages:
     css = "user-message" if message["role"] == "user" else "assistant-message"
     st.markdown(f'<div class="chat-message {css}">{message["content"]}</div>',
                 unsafe_allow_html=True)
+
 
 # =========================
 # Chat Input
@@ -180,10 +205,12 @@ if prompt := st.chat_input("Press Enter to send • Shift+Enter for new line"):
     with st.spinner("Thinking..."):
         try:
             # ---------- INGEST ----------
-            if DEPLOY_MODE == "cloud":
-                call_cloud_ingest()
-            else:
-                os.environ["GITHUB_TOKEN"] = st.session_state.git_token
+            if not st.session_state.ingested:
+                if DEPLOY_MODE == "cloud":
+                    call_cloud_ingest()
+                else:
+                    os.environ["GITHUB_TOKEN"] = st.session_state.git_token
+                    st.session_state.ingested = True
 
             # ---------- QUERY ----------
             if DEPLOY_MODE == "cloud":
