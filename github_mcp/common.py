@@ -177,23 +177,25 @@ def upsert(conn, sql: str, params: tuple[Any, ...]) -> None:
         conn.execute(sql, params)
         conn.commit()
 
+
 def fetchall(conn, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
     if DB_MODE == "postgres":
         with conn.cursor() as cur:
             cur.execute(sql, params)
-            return cur.fetchall()
+            rows = cur.fetchall()
+            return rows
     else:
-        sql = adapt_sql(sql)
         cur = conn.execute(sql, params)
         return [dict(r) for r in cur.fetchall()]
+
 
 def fetchone(conn, sql: str, params: tuple[Any, ...] = ()) -> Optional[dict[str, Any]]:
     if DB_MODE == "postgres":
         with conn.cursor() as cur:
             cur.execute(sql, params)
-            return cur.fetchone()
+            row = cur.fetchone()
+            return row
     else:
-        sql = adapt_sql(sql)
         cur = conn.execute(sql, params)
         row = cur.fetchone()
         return dict(row) if row else None
