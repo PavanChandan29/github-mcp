@@ -15,36 +15,59 @@ except ImportError:
 LOGGER = logging.getLogger("github_mcp")
 logging.basicConfig(level=logging.INFO)
 
+# =========================
+# ENV CONFIG
+# =========================
+
 DB_MODE = os.environ.get("DB_MODE", "sqlite").lower()
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
-SQLITE_PATH = Path(os.environ.get("SQLITE_DB_PATH", "/tmp/github_mcp.db"))
+# Default to local file for Windows/Linux
+SQLITE_PATH = Path(os.environ.get("SQLITE_DB_PATH", "github_mcp.db"))
 
-# ============================
+# =========================
+# SQL ADAPTER
+# =========================
+
+def adapt_sql(sql: str) -> str:
+    """
+    Converts %s placeholders to ? for SQLite automatically.
+    """
+    if DB_MODE == "sqlite":
+        return sql.replace("%s", "?")
+    return sql
+
+# =========================
 # CONNECTION
-# ============================
+# =========================
 
 def connect():
     if DB_MODE == "postgres":
+        if not psycopg2:
+            raise RuntimeError("psycopg2 not installed")
+
         if not DATABASE_URL:
             raise RuntimeError("DATABASE_URL not set for Postgres mode")
 
         LOGGER.info("Connecting to Supabase Postgres...")
         return psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
 
-    else:
-        LOGGER.info("Using local SQLite DB at %s", SQLITE_PATH)
-        conn = sqlite3.connect(SQLITE_PATH, check_same_thread=False)
-        conn.row_factory = sqlite3.Row
-        return conn
+    # SQLite mode
+    SQLITE_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-# ============================
-# SCHEMA
-# ============================
+    LOGGER.info("Using local SQLite DB at %s", SQLITE_PATH)
+    conn = sqlite3.connect(SQLITE_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+# =========================
+# SCHEMA (SQLite ONLY)
+# Supabase tables are managed externally
+# =========================
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS repos (
-    user TEXT NOT NULL,
+    user_name TEXT NOT NULL,
     repo TEXT NOT NULL,
     default_branch TEXT,
     description TEXT,
@@ -64,11 +87,11 @@ CREATE TABLE IF NOT EXISTS repos (
     license_name TEXT,
     is_archived INTEGER DEFAULT 0,
     is_fork INTEGER DEFAULT 0,
-    PRIMARY KEY (user, repo)
+    PRIMARY KEY (user_name, repo)
 );
 
 CREATE TABLE IF NOT EXISTS commits (
-    user TEXT NOT NULL,
+    user_name TEXT NOT NULL,
     repo TEXT NOT NULL,
     sha TEXT NOT NULL,
     authored_at TEXT,
@@ -78,12 +101,11 @@ CREATE TABLE IF NOT EXISTS commits (
     files_changed INTEGER,
     additions INTEGER,
     deletions INTEGER,
-    diff_summary TEXT,
-    PRIMARY KEY (user, repo, sha)
+    PRIMARY KEY (user_name, repo, sha)
 );
 
 CREATE TABLE IF NOT EXISTS repo_signals (
-    user TEXT NOT NULL,
+    user_name TEXT NOT NULL,
     repo TEXT NOT NULL,
     has_tests INTEGER,
     has_github_actions INTEGER,
@@ -108,30 +130,42 @@ CREATE TABLE IF NOT EXISTS repo_signals (
     automation_score REAL DEFAULT 0.0,
     tech_stack TEXT,
     signals_json TEXT,
-    PRIMARY KEY (user, repo)
+    PRIMARY KEY (user_name, repo)
 );
 
-CREATE INDEX IF NOT EXISTS idx_commits_repo_time
-ON commits(user, repo, authored_at);
+CREATE TABLE IF NOT EXISTS repo_text_files (
+    user_name TEXT NOT NULL,
+    repo TEXT NOT NULL,
+    path TEXT NOT NULL,
+    extension TEXT,
+    content TEXT,
+    PRIMARY KEY (user_name, repo, path)
+);
 
-CREATE INDEX IF NOT EXISTS idx_repos_pushed_at
-ON repos(user, pushed_at DESC);
+CREATE TABLE IF NOT EXISTS users (
+    user_name TEXT PRIMARY KEY,
+    last_ingested_at TEXT,
+    status TEXT DEFAULT 'ready',
+    repo_count INTEGER DEFAULT 0,
+    error TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_repos_user_pushed
+ON repos(user_name, pushed_at DESC);
 """
 
-def init_schema(conn) -> None:
-    LOGGER.info("Initializing database schema...")
-
+def init_schema(conn):
     if DB_MODE == "postgres":
-        with conn.cursor() as cur:
-            cur.execute(SCHEMA_SQL)
-        conn.commit()
-    else:
-        conn.executescript(SCHEMA_SQL)
-        conn.commit()
+        LOGGER.info("Supabase schema is managed externally")
+        return
 
-# ============================
-# HELPERS
-# ============================
+    LOGGER.info("Initializing SQLite schema...")
+    conn.executescript(SCHEMA_SQL)
+    conn.commit()
+
+# =========================
+# DB HELPERS
+# =========================
 
 def upsert(conn, sql: str, params: tuple[Any, ...]) -> None:
     if DB_MODE == "postgres":
@@ -139,6 +173,7 @@ def upsert(conn, sql: str, params: tuple[Any, ...]) -> None:
             cur.execute(sql, params)
         conn.commit()
     else:
+        sql = adapt_sql(sql)
         conn.execute(sql, params)
         conn.commit()
 
@@ -148,6 +183,7 @@ def fetchall(conn, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any
             cur.execute(sql, params)
             return cur.fetchall()
     else:
+        sql = adapt_sql(sql)
         cur = conn.execute(sql, params)
         return [dict(r) for r in cur.fetchall()]
 
@@ -157,6 +193,7 @@ def fetchone(conn, sql: str, params: tuple[Any, ...] = ()) -> Optional[dict[str,
             cur.execute(sql, params)
             return cur.fetchone()
     else:
+        sql = adapt_sql(sql)
         cur = conn.execute(sql, params)
         row = cur.fetchone()
         return dict(row) if row else None

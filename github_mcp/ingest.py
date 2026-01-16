@@ -12,6 +12,7 @@ import httpx
 from dotenv import load_dotenv
 
 from .common import LOGGER, connect, fetchall, fetchone, init_schema, upsert
+from .user_service import upsert_user
 
 GITHUB_API = "https://api.github.com"
 
@@ -46,16 +47,16 @@ async def _get_text(client: httpx.AsyncClient, url: str, token: str) -> str:
     return resp.text
 
 
-async def list_repos(user: str, token: str) -> list[dict[str, Any]]:
+async def list_repos(user_name: str, token: str) -> list[dict[str, Any]]:
     async with httpx.AsyncClient() as client:
-        # Use /users/{user}/repos (public) or /user/repos when token belongs to the user.
+        # Use /users/{user_name}/repos (public) or /user/repos when token belongs to the user.
         # Here we use /users to allow analyzing any public profile with a token for rate limits.
         repos = []
         page = 1
         while True:
             data = await _get_json(
                 client,
-                f"{GITHUB_API}/users/{user}/repos",
+                f"{GITHUB_API}/users/{user_name}/repos",
                 token,
                 params={"per_page": 100, "page": page, "sort": "updated"},
             )
@@ -66,11 +67,11 @@ async def list_repos(user: str, token: str) -> list[dict[str, Any]]:
         return repos
 
 
-async def fetch_readme(user: str, repo: str, token: str, default_branch: str) -> str:
+async def fetch_readme(user_name: str, repo: str, token: str, default_branch: str) -> str:
     async with httpx.AsyncClient() as client:
         # GitHub README API returns base64 content.
         try:
-            data = await _get_json(client, f"{GITHUB_API}/repos/{user}/{repo}/readme", token)
+            data = await _get_json(client, f"{GITHUB_API}/repos/{user_name}/{repo}/readme", token)
             content_b64 = data.get("content", "")
             if content_b64:
                 return base64.b64decode(content_b64).decode("utf-8", errors="replace")
@@ -79,18 +80,18 @@ async def fetch_readme(user: str, repo: str, token: str, default_branch: str) ->
         return ""
 
 
-async def list_tree(user: str, repo: str, token: str, default_branch: str) -> list[str]:
+async def list_tree(user_name: str, repo: str, token: str, default_branch: str) -> list[str]:
     """
     Shallow repo signals: we fetch the git tree (recursive=1) and inspect file paths.
     """
     async with httpx.AsyncClient() as client:
-        ref = await _get_json(client, f"{GITHUB_API}/repos/{user}/{repo}/git/refs/heads/{default_branch}", token)
+        ref = await _get_json(client, f"{GITHUB_API}/repos/{user_name}/{repo}/git/refs/heads/{default_branch}", token)
         sha = ref["object"]["sha"]
-        commit = await _get_json(client, f"{GITHUB_API}/repos/{user}/{repo}/git/commits/{sha}", token)
+        commit = await _get_json(client, f"{GITHUB_API}/repos/{user_name}/{repo}/git/commits/{sha}", token)
         tree_sha = commit["tree"]["sha"]
         tree = await _get_json(
             client,
-            f"{GITHUB_API}/repos/{user}/{repo}/git/trees/{tree_sha}",
+            f"{GITHUB_API}/repos/{user_name}/{repo}/git/trees/{tree_sha}",
             token,
             params={"recursive": "1"},
         )
@@ -318,7 +319,7 @@ def detect_signals(paths: list[str]) -> dict[str, Any]:
     }
 
 
-async def list_commits(user: str, repo: str, token: str, max_commits: int = 200) -> list[dict[str, Any]]:
+async def list_commits(user_name: str, repo: str, token: str, max_commits: int = 200) -> list[dict[str, Any]]:
     commits: list[dict[str, Any]] = []
     per_page = 100
     page = 1
@@ -326,7 +327,7 @@ async def list_commits(user: str, repo: str, token: str, max_commits: int = 200)
         while len(commits) < max_commits:
             batch = await _get_json(
                 client,
-                f"{GITHUB_API}/repos/{user}/{repo}/commits",
+                f"{GITHUB_API}/repos/{user_name}/{repo}/commits",
                 token,
                 params={"per_page": per_page, "page": page},
             )
@@ -339,10 +340,47 @@ async def list_commits(user: str, repo: str, token: str, max_commits: int = 200)
     return commits[:max_commits]
 
 
-async def fetch_commit_details(user: str, repo: str, sha: str, token: str) -> dict[str, Any]:
+async def fetch_commit_details(user_name: str, repo: str, sha: str, token: str) -> dict[str, Any]:
     async with httpx.AsyncClient() as client:
-        return await _get_json(client, f"{GITHUB_API}/repos/{user}/{repo}/commits/{sha}", token)
+        return await _get_json(client, f"{GITHUB_API}/repos/{user_name}/{repo}/commits/{sha}", token)
 
+async def fetch_file_content(user_name: str, repo: str, path: str, token: str, ref: str) -> str:
+    raw_url = f"https://raw.githubusercontent.com/{user_name}/{repo}/{ref}/{path}"
+
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(raw_url, headers=_headers(token), timeout=60.0)
+        resp.raise_for_status()
+        return resp.text
+
+async def repo_text_files(user_name: str, repo: str, token: str, default_branch: str):
+    paths = await list_tree(user_name, repo, token, default_branch)
+
+    target_exts = (".md", ".json", ".txt", ".toml")
+
+    text_files = [
+        p for p in paths
+        if p.lower().endswith(target_exts)
+        and not p.lower().startswith(".git/")
+    ]
+
+    LOGGER.info("Found %d text files in %s/%s", len(text_files), user_name, repo)
+
+    results = []
+
+    for path in text_files:
+        try:
+            content = await fetch_file_content(user_name, repo, path, token, default_branch)
+
+            results.append({
+                "path": path,
+                "extension": Path(path).suffix.lower(),
+                "content": content[:100_000]  # safety cap
+            })
+
+        except Exception as e:
+            LOGGER.warning("Failed to fetch %s in %s/%s: %s", path, user_name, repo, e)
+
+    return results
 
 def _iso(dt: Optional[str]) -> str:
     if not dt:
@@ -350,162 +388,236 @@ def _iso(dt: Optional[str]) -> str:
     return dt
 
 
-async def ingest(user: str, token: str, max_commits: int) -> None:
+async def ingest(user_name: str, token: str, max_commits: int) -> None:
     conn = connect()
     init_schema(conn)
 
-    repos = await list_repos(user, token)
-    LOGGER.info("Found %d repos for user=%s", len(repos), user)
+    # --- Mark user ingestion as started ---
+    upsert_user(user_name=user_name, status="in_progress", repo_count=0)
 
-    for r in repos:
-        repo = r["name"]
-        default_branch = r.get("default_branch") or "main"
-        description = r.get("description") or ""
-        language = r.get("language") or ""
-        html_url = r.get("html_url") or ""
-        pushed_at = r.get("pushed_at") or ""
-        created_at = r.get("created_at") or ""
-        updated_at = r.get("updated_at") or ""
-        stargazers_count = r.get("stargazers_count", 0)
-        forks_count = r.get("forks_count", 0)
-        watchers_count = r.get("watchers_count", 0)
-        open_issues_count = r.get("open_issues_count", 0)
-        size = r.get("size", 0)
-        topics = json.dumps(r.get("topics", [])) if r.get("topics") else ""
-        license_name = r.get("license", {}).get("name", "") if r.get("license") else ""
-        is_archived = 1 if r.get("archived", False) else 0
-        is_fork = 1 if r.get("fork", False) else 0
-        
-        readme_text = await fetch_readme(user, repo, token, default_branch)
+    try:
+        repos = await list_repos(user_name, token)
+        repo_count = len(repos)
 
-        upsert(
-            conn,
-            """
-            INSERT INTO repos(user, repo, default_branch, description, language, html_url, readme_text, 
-                           last_ingested_at, pushed_at, created_at, updated_at, stargazers_count, 
-                           forks_count, watchers_count, open_issues_count, size, topics, license_name, 
-                           is_archived, is_fork)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(user, repo) DO UPDATE SET
-              default_branch=excluded.default_branch,
-              description=excluded.description,
-              language=excluded.language,
-              html_url=excluded.html_url,
-              readme_text=excluded.readme_text,
-              last_ingested_at=excluded.last_ingested_at,
-              pushed_at=excluded.pushed_at,
-              created_at=excluded.created_at,
-              updated_at=excluded.updated_at,
-              stargazers_count=excluded.stargazers_count,
-              forks_count=excluded.forks_count,
-              watchers_count=excluded.watchers_count,
-              open_issues_count=excluded.open_issues_count,
-              size=excluded.size,
-              topics=excluded.topics,
-              license_name=excluded.license_name,
-              is_archived=excluded.is_archived,
-              is_fork=excluded.is_fork
-            """,
-            (user, repo, default_branch, description, language, html_url, readme_text, 
-             datetime.now(timezone.utc).isoformat(), pushed_at, created_at, updated_at,
-             stargazers_count, forks_count, watchers_count, open_issues_count, size, topics,
-             license_name, is_archived, is_fork),
-        )
+        LOGGER.info("Found %d repos for user=%s", repo_count, user_name)
 
-        # Signals
-        try:
-            paths = await list_tree(user, repo, token, default_branch)
-            sig = detect_signals(paths)
+        for r in repos:
+            repo = r["name"]
+            default_branch = r.get("default_branch") or "main"
+            description = r.get("description") or ""
+            language = r.get("language") or ""
+            html_url = r.get("html_url") or ""
+            pushed_at = r.get("pushed_at") or ""
+            created_at = r.get("created_at") or ""
+            updated_at = r.get("updated_at") or ""
+            stargazers_count = r.get("stargazers_count", 0)
+            forks_count = r.get("forks_count", 0)
+            watchers_count = r.get("watchers_count", 0)
+            open_issues_count = r.get("open_issues_count", 0)
+            size = r.get("size", 0)
+            topics = json.dumps(r.get("topics", [])) if r.get("topics") else ""
+            license_name = r.get("license", {}).get("name", "") if r.get("license") else ""
+            is_archived = 1 if r.get("archived", False) else 0
+            is_fork = 1 if r.get("fork", False) else 0
+
+            readme_text = await fetch_readme(user_name, repo, token, default_branch)
+
             upsert(
                 conn,
                 """
-                INSERT INTO repo_signals(
-                  user, repo, has_tests, has_github_actions, has_ci_config, has_lint_config,
-                  has_precommit, has_dockerfile, has_docker_compose, has_makefile, detected_test_framework, detected_ci,
-                  has_code_of_conduct, has_contributing, has_license, has_security_policy,
-                  has_issue_templates, has_pr_templates, has_changelog, has_docs,
-                  organization_score, coding_standards_score, automation_score, tech_stack, signals_json
+                INSERT INTO repos(
+                  user_name, repo, default_branch, description, language, html_url,
+                  readme_text, last_ingested_at, pushed_at, created_at, updated_at,
+                  stargazers_count, forks_count, watchers_count,
+                  open_issues_count, size, topics, license_name,
+                  is_archived, is_fork
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(user, repo) DO UPDATE SET
-                  has_tests=excluded.has_tests,
-                  has_github_actions=excluded.has_github_actions,
-                  has_ci_config=excluded.has_ci_config,
-                  has_lint_config=excluded.has_lint_config,
-                  has_precommit=excluded.has_precommit,
-                  has_dockerfile=excluded.has_dockerfile,
-                  has_docker_compose=excluded.has_docker_compose,
-                  has_makefile=excluded.has_makefile,
-                  detected_test_framework=excluded.detected_test_framework,
-                  detected_ci=excluded.detected_ci,
-                  has_code_of_conduct=excluded.has_code_of_conduct,
-                  has_contributing=excluded.has_contributing,
-                  has_license=excluded.has_license,
-                  has_security_policy=excluded.has_security_policy,
-                  has_issue_templates=excluded.has_issue_templates,
-                  has_pr_templates=excluded.has_pr_templates,
-                  has_changelog=excluded.has_changelog,
-                  has_docs=excluded.has_docs,
-                  organization_score=excluded.organization_score,
-                  coding_standards_score=excluded.coding_standards_score,
-                  automation_score=excluded.automation_score,
-                  tech_stack=excluded.tech_stack,
-                  signals_json=excluded.signals_json
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT(user_name, repo) DO UPDATE SET
+                  default_branch=excluded.default_branch,
+                  description=excluded.description,
+                  language=excluded.language,
+                  html_url=excluded.html_url,
+                  readme_text=excluded.readme_text,
+                  last_ingested_at=excluded.last_ingested_at,
+                  pushed_at=excluded.pushed_at,
+                  created_at=excluded.created_at,
+                  updated_at=excluded.updated_at,
+                  stargazers_count=excluded.stargazers_count,
+                  forks_count=excluded.forks_count,
+                  watchers_count=excluded.watchers_count,
+                  open_issues_count=excluded.open_issues_count,
+                  size=excluded.size,
+                  topics=excluded.topics,
+                  license_name=excluded.license_name,
+                  is_archived=excluded.is_archived,
+                  is_fork=excluded.is_fork
                 """,
                 (
-                    user, repo,
-                    sig["has_tests"], sig["has_github_actions"], sig["has_ci_config"], sig["has_lint_config"],
-                    sig["has_precommit"], sig["has_dockerfile"], sig.get("has_docker_compose", 0), sig["has_makefile"],
-                    sig["detected_test_framework"], sig["detected_ci"],
-                    sig["has_code_of_conduct"], sig["has_contributing"], sig["has_license"],
-                    sig["has_security_policy"], sig["has_issue_templates"], sig["has_pr_templates"],
-                    sig["has_changelog"], sig["has_docs"],
-                    sig["organization_score"], sig["coding_standards_score"], sig["automation_score"],
-                    sig["tech_stack"],
-                    json.dumps(sig["signals_json"]),
+                    user_name, repo, default_branch, description, language, html_url, readme_text,
+                    datetime.now(timezone.utc).isoformat(),
+                    pushed_at, created_at, updated_at,
+                    stargazers_count, forks_count, watchers_count,
+                    open_issues_count, size, topics, license_name,
+                    is_archived, is_fork
                 ),
             )
-        except Exception as e:
-            LOGGER.warning("Signals scan failed for %s/%s: %s", user, repo, e)
 
-        # Commits (metadata only; diff_summary left for later enhancement)
-        try:
-            commits = await list_commits(user, repo, token, max_commits=max_commits)
-            for c in commits:
-                sha = c["sha"]
-                details = await fetch_commit_details(user, repo, sha, token)
-                commit_obj = details.get("commit", {})
-                authored_at = commit_obj.get("author", {}).get("date", "")
-                message = commit_obj.get("message", "")
-                author_name = commit_obj.get("author", {}).get("name", "")
-                author_login = (details.get("author") or {}).get("login", "") if details.get("author") else ""
-                files = details.get("files") or []
-                additions = details.get("stats", {}).get("additions", 0)
-                deletions = details.get("stats", {}).get("deletions", 0)
+            # --- Signals ---
+            try:
+                paths = await list_tree(user_name, repo, token, default_branch)
+                sig = detect_signals(paths)
 
                 upsert(
                     conn,
                     """
-                    INSERT INTO commits(
-                      user, repo, sha, authored_at, message, author_name, author_login,
-                      files_changed, additions, deletions, diff_summary
+                    INSERT INTO repo_signals (
+                      user_name, repo,
+                      has_tests, has_github_actions, has_ci_config, has_lint_config,
+                      has_precommit, has_dockerfile, has_docker_compose, has_makefile,
+                      detected_test_framework, detected_ci,
+                      has_code_of_conduct, has_contributing, has_license, has_security_policy,
+                      has_issue_templates, has_pr_templates, has_changelog, has_docs,
+                      organization_score, coding_standards_score, automation_score,
+                      tech_stack, signals_json
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(user, repo, sha) DO UPDATE SET
-                      authored_at=excluded.authored_at,
-                      message=excluded.message,
-                      author_name=excluded.author_name,
-                      author_login=excluded.author_login,
-                      files_changed=excluded.files_changed,
-                      additions=excluded.additions,
-                      deletions=excluded.deletions
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT(user_name, repo) DO UPDATE SET
+                      has_tests=excluded.has_tests,
+                      has_github_actions=excluded.has_github_actions,
+                      has_ci_config=excluded.has_ci_config,
+                      has_lint_config=excluded.has_lint_config,
+                      has_precommit=excluded.has_precommit,
+                      has_dockerfile=excluded.has_dockerfile,
+                      has_docker_compose=excluded.has_docker_compose,
+                      has_makefile=excluded.has_makefile,
+                      detected_test_framework=excluded.detected_test_framework,
+                      detected_ci=excluded.detected_ci,
+                      has_code_of_conduct=excluded.has_code_of_conduct,
+                      has_contributing=excluded.has_contributing,
+                      has_license=excluded.has_license,
+                      has_security_policy=excluded.has_security_policy,
+                      has_issue_templates=excluded.has_issue_templates,
+                      has_pr_templates=excluded.has_pr_templates,
+                      has_changelog=excluded.has_changelog,
+                      has_docs=excluded.has_docs,
+                      organization_score=excluded.organization_score,
+                      coding_standards_score=excluded.coding_standards_score,
+                      automation_score=excluded.automation_score,
+                      tech_stack=excluded.tech_stack,
+                      signals_json=excluded.signals_json
                     """,
-                    (user, repo, sha, authored_at, message, author_name, author_login, len(files), additions, deletions, ""),
+                    (
+                        user_name, repo,
+                        sig["has_tests"], sig["has_github_actions"], sig["has_ci_config"], sig["has_lint_config"],
+                        sig["has_precommit"], sig["has_dockerfile"], sig.get("has_docker_compose", 0), sig["has_makefile"],
+                        sig["detected_test_framework"], sig["detected_ci"],
+                        sig["has_code_of_conduct"], sig["has_contributing"], sig["has_license"],
+                        sig["has_security_policy"], sig["has_issue_templates"], sig["has_pr_templates"],
+                        sig["has_changelog"], sig["has_docs"],
+                        sig["organization_score"], sig["coding_standards_score"], sig["automation_score"],
+                        sig["tech_stack"], json.dumps(sig["signals_json"]),
+                    ),
                 )
-        except Exception as e:
-            LOGGER.warning("Commit ingestion failed for %s/%s: %s", user, repo, e)
 
-    LOGGER.info("Ingestion complete. DB=%s", conn)
+            except Exception as e:
+                LOGGER.warning("Signals scan failed for %s/%s: %s", user_name, repo, e)
+
+            # --- Repo Text Files Ingestion ---
+            try:
+                files = await repo_text_files(user_name, repo, token, default_branch)
+
+                for f in files:
+                    upsert(
+                        conn,
+                        """
+                        INSERT INTO repo_text_files (
+                            user_name, repo, path, extension, content
+                        )
+                        VALUES (%s, %s, %s, %s, %s)
+                        ON CONFLICT (user_name, repo, path) DO UPDATE SET
+                            extension = EXCLUDED.extension,
+                            content = EXCLUDED.content
+                        """,
+                        (
+                            user_name,
+                            repo,
+                            f["path"],
+                            f["extension"],
+                            f["content"],
+                        ),
+                    )
+
+
+            except Exception as e:
+                LOGGER.warning("Text file ingestion failed for %s/%s: %s", user_name, repo, e)
+
+            # --- Commits ---
+            try:
+                commits = await list_commits(user_name, repo, token, max_commits=max_commits)
+
+                for c in commits:
+                    sha = c["sha"]
+                    details = await fetch_commit_details(user_name, repo, sha, token)
+
+                    commit_obj = details.get("commit", {})
+                    authored_at = commit_obj.get("author", {}).get("date", "")
+                    message = commit_obj.get("message", "")
+                    author_name = commit_obj.get("author", {}).get("name", "")
+                    author_login = (details.get("author") or {}).get("login", "") if details.get("author") else ""
+                    files = details.get("files") or []
+                    additions = details.get("stats", {}).get("additions", 0)
+                    deletions = details.get("stats", {}).get("deletions", 0)
+
+                    upsert(
+                        conn,
+                        """
+                        INSERT INTO commits (
+                           user_name, repo, sha, authored_at, message,
+                           author_name, author_login, files_changed,
+                           additions, deletions
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (user_name, repo, sha) DO UPDATE SET
+                           authored_at = EXCLUDED.authored_at,
+                           message = EXCLUDED.message,
+                           author_name = EXCLUDED.author_name,
+                           author_login = EXCLUDED.author_login,
+                           files_changed = EXCLUDED.files_changed,
+                           additions = EXCLUDED.additions,
+                           deletions = EXCLUDED.deletions
+                        """,
+                        (
+                            user_name, repo, sha, authored_at, message,
+                            author_name, author_login,
+                            len(files), additions, deletions,
+                        ),
+                    )
+
+            except Exception as e:
+                LOGGER.warning("Commit ingestion failed for %s/%s: %s", user_name, repo, e)
+
+        # --- Mark user ingestion as successful ---
+        upsert_user(
+            user_name=user_name,
+            repo_count=repo_count,
+            status="completed",
+            error=None
+        )
+
+        LOGGER.info("Ingestion complete for user=%s. Repos=%d", user_name, repo_count)
+
+    except Exception as e:
+        # --- Mark user ingestion as failed ---
+        upsert_user(
+            user_name=user_name,
+            repo_count=0,
+            status="failed",
+            error=str(e)
+        )
+
+        LOGGER.exception("User ingestion failed for %s", user_name)
+        raise
 
 
 def main():
@@ -523,7 +635,7 @@ def main():
     # --- Load config ---
     config = load_config()
 
-    user = config["github"]["user"]
+    user_name = config["github"]["user"]
     max_commits = config["ingestion"].get("max_commits_per_repo", 200)
 
     data_dir = config.get("storage", {}).get("data_dir")
@@ -539,7 +651,7 @@ def main():
         )
 
     import asyncio
-    asyncio.run(ingest(user, token, max_commits))
+    asyncio.run(ingest(user_name, token, max_commits))
 
 
 if __name__ == "__main__":
