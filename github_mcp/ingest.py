@@ -7,7 +7,10 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 import yaml
 from pathlib import Path
+from dotenv import load_dotenv
+from pathlib import Path
 
+load_dotenv(Path(__file__).parent / "secrets.env", override=False)
 import httpx
 from dotenv import load_dotenv
 
@@ -15,11 +18,6 @@ from .common import LOGGER, connect, fetchall, fetchone, init_schema, upsert
 from .user_service import upsert_user
 
 GITHUB_API = "https://api.github.com"
-
-# Load secrets from secrets.env file in the same directory
-_secrets_path = Path(__file__).parent / "secrets.env"
-if _secrets_path.exists():
-    load_dotenv(_secrets_path)
 
 
 def load_config() -> dict:
