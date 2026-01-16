@@ -3,8 +3,9 @@ from __future__ import annotations
 import os
 import logging
 import asyncio
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+from concurrent.futures import ThreadPoolExecutor
 
 from github_mcp.common import connect
 from github_mcp.ingest import ingest
@@ -14,13 +15,20 @@ from github_mcp.user_service import upsert_user
 # -------------------------------------------------
 # Logging
 # -------------------------------------------------
-LOGGER = logging.getLogger("codesense_api")
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+    force=True,
+)
+LOGGER = logging.getLogger("BitofGit_API")
 
 # -------------------------------------------------
 # FastAPI App
 # -------------------------------------------------
-app = FastAPI(title="CodeSense API", version="1.0")
+app = FastAPI(title="BitofGit API", version="1.0")
+
+# Thread pool for background ingestion
+executor = ThreadPoolExecutor(max_workers=2)
 
 # -------------------------------------------------
 # Models
@@ -36,7 +44,7 @@ class QueryRequest(BaseModel):
 
 
 # -------------------------------------------------
-# Startup: Test DB / Supabase Connection
+# Startup: Test DB + Print Users
 # -------------------------------------------------
 @app.on_event("startup")
 def startup_check():
@@ -46,11 +54,17 @@ def startup_check():
         if os.environ.get("DB_MODE") == "postgres":
             with conn.cursor() as cur:
                 cur.execute("SELECT 1;")
+                cur.execute("SELECT username FROM users;")
+                users = cur.fetchall()
         else:
             conn.execute("SELECT 1;")
+            cur = conn.execute("SELECT username FROM users;")
+            users = cur.fetchall()
 
         conn.close()
+
         LOGGER.info("✅ Database connection successful")
+        LOGGER.info(f"📌 Existing users in DB: {users}")
 
     except Exception as e:
         LOGGER.error(f"❌ Database connection failed: {e}")
@@ -62,17 +76,20 @@ def startup_check():
 @app.get("/")
 def health():
     return {
-        "status": "CodeSense API is running",
+        "status": "BitofGit API is running",
         "db_mode": os.environ.get("DB_MODE", "sqlite"),
         "supabase": bool(os.environ.get("DATABASE_URL")),
     }
 
 
 # -------------------------------------------------
-# Background Ingestion Worker
+# Background Ingestion Worker (THREAD SAFE)
 # -------------------------------------------------
 def run_ingestion_job(username: str, token: str):
     try:
+        print(f"🔥 Ingestion thread started for {username}", flush=True)
+        LOGGER.info(f"Starting ingestion job for {username}")
+
         os.environ["GITHUB_TOKEN"] = token
 
         asyncio.run(
@@ -83,8 +100,17 @@ def run_ingestion_job(username: str, token: str):
             )
         )
 
+        LOGGER.info(f"✅ Ingestion completed for {username}")
+
+        upsert_user(
+            user_name=username,
+            status="completed",
+            repo_count=0,
+            error=None,
+        )
+
     except Exception as e:
-        LOGGER.exception(f"Ingestion failed for {username}")
+        LOGGER.exception(f"❌ Ingestion failed for {username}")
         upsert_user(
             user_name=username,
             status="failed",
@@ -94,14 +120,13 @@ def run_ingestion_job(username: str, token: str):
 
 
 # -------------------------------------------------
-# Ingest Route (Non-Blocking)
+# Ingest Route (Non-Blocking + Reliable)
 # -------------------------------------------------
 @app.post("/ingest")
-async def ingest_user(data: IngestRequest, background_tasks: BackgroundTasks):
+async def ingest_user(data: IngestRequest):
     try:
-        LOGGER.info(f"Starting background ingestion for user={data.username}")
+        LOGGER.info(f"🚀 Ingest API hit for user={data.username}")
 
-        # Mark as in-progress
         upsert_user(
             user_name=data.username,
             status="in_progress",
@@ -109,7 +134,10 @@ async def ingest_user(data: IngestRequest, background_tasks: BackgroundTasks):
             error=None,
         )
 
-        background_tasks.add_task(
+        # Force background execution via thread
+        loop = asyncio.get_running_loop()
+        loop.run_in_executor(
+            executor,
             run_ingestion_job,
             data.username,
             data.github_token,
@@ -149,6 +177,8 @@ def get_user_status(username: str):
             user = dict(user) if user else None
 
         conn.close()
+
+        LOGGER.info(f"📊 Status fetched for {username}: {user}")
         return user or {"status": "not_found"}
 
     except Exception as e:
@@ -162,7 +192,7 @@ def get_user_status(username: str):
 @app.post("/query")
 async def query_user(data: QueryRequest):
     try:
-        LOGGER.info(f"Query for user={data.username}: {data.question}")
+        LOGGER.info(f"💬 Query for {data.username}: {data.question}")
 
         initial_state = {
             "question": data.question,
@@ -177,6 +207,8 @@ async def query_user(data: QueryRequest):
         }
 
         result = await agent.ainvoke(initial_state)
+
+        LOGGER.info(f"🤖 Answer generated for {data.username}")
 
         return {
             "answer": result.get("final_answer", "No response generated"),
