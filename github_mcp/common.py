@@ -16,13 +16,15 @@ LOGGER = logging.getLogger("github_mcp")
 logging.basicConfig(level=logging.INFO)
 
 # =========================
-# ENV CONFIG
+# ENV HELPERS (DYNAMIC)
 # =========================
 
-DB_MODE = os.environ.get("DB_MODE", "sqlite").lower()
-DATABASE_URL = os.environ.get("DATABASE_URL")
+def get_db_mode() -> str:
+    return os.environ.get("DB_MODE", "postgres").lower()
 
-# Default to local file for Windows/Linux
+def get_database_url() -> Optional[str]:
+    return os.environ.get("DATABASE_URL")
+
 SQLITE_PATH = Path(os.environ.get("SQLITE_DB_PATH", "github_mcp.db"))
 
 # =========================
@@ -33,7 +35,7 @@ def adapt_sql(sql: str) -> str:
     """
     Converts %s placeholders to ? for SQLite automatically.
     """
-    if DB_MODE == "sqlite":
+    if get_db_mode() == "sqlite":
         return sql.replace("%s", "?")
     return sql
 
@@ -42,27 +44,31 @@ def adapt_sql(sql: str) -> str:
 # =========================
 
 def connect():
-    if DB_MODE == "postgres":
+    db_mode = get_db_mode()
+    database_url = get_database_url()
+
+    LOGGER.info(f"CONNECT DB_MODE: {db_mode}")
+
+    if db_mode == "postgres":
         if not psycopg2:
             raise RuntimeError("psycopg2 not installed")
 
-        if not DATABASE_URL:
+        if not database_url:
             raise RuntimeError("DATABASE_URL not set for Postgres mode")
 
         LOGGER.info("Connecting to Supabase Postgres...")
-        return psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        return psycopg2.connect(database_url, cursor_factory=RealDictCursor)
 
-    # SQLite mode
+    # SQLite fallback (local dev only)
     SQLITE_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-    LOGGER.info("Using local SQLite DB at %s", SQLITE_PATH)
+    LOGGER.warning("⚠️ Using local SQLite DB at %s", SQLITE_PATH)
     conn = sqlite3.connect(SQLITE_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
 
 # =========================
 # SCHEMA (SQLite ONLY)
-# Supabase tables are managed externally
 # =========================
 
 SCHEMA_SQL = """
@@ -155,7 +161,7 @@ ON repos(user_name, pushed_at DESC);
 """
 
 def init_schema(conn):
-    if DB_MODE == "postgres":
+    if get_db_mode() == "postgres":
         LOGGER.info("Supabase schema is managed externally")
         return
 
@@ -168,7 +174,7 @@ def init_schema(conn):
 # =========================
 
 def upsert(conn, sql: str, params: tuple[Any, ...]) -> None:
-    if DB_MODE == "postgres":
+    if get_db_mode() == "postgres":
         with conn.cursor() as cur:
             cur.execute(sql, params)
         conn.commit()
@@ -179,22 +185,20 @@ def upsert(conn, sql: str, params: tuple[Any, ...]) -> None:
 
 
 def fetchall(conn, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
-    if DB_MODE == "postgres":
+    if get_db_mode() == "postgres":
         with conn.cursor() as cur:
             cur.execute(sql, params)
-            rows = cur.fetchall()
-            return rows
+            return cur.fetchall()
     else:
         cur = conn.execute(sql, params)
         return [dict(r) for r in cur.fetchall()]
 
 
 def fetchone(conn, sql: str, params: tuple[Any, ...] = ()) -> Optional[dict[str, Any]]:
-    if DB_MODE == "postgres":
+    if get_db_mode() == "postgres":
         with conn.cursor() as cur:
             cur.execute(sql, params)
-            row = cur.fetchone()
-            return row
+            return cur.fetchone()
     else:
         cur = conn.execute(sql, params)
         row = cur.fetchone()
