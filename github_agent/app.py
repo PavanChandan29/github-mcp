@@ -306,30 +306,6 @@ if prompt := st.chat_input("Press Enter to send • Shift+Enter for new line"):
         st.session_state.messages.append({"role": "assistant", "content": response})
         st.rerun()
 
-    # 🔥 NEW: Check if ingestion is still running
-    if DEPLOY_MODE == "cloud":
-        current_status = check_ingestion_status()
-        if current_status:
-            st.session_state.ingestion_status = current_status
-
-        if current_status in ["pending", "in_progress"]:
-            response = f"⏳ Please wait! Your repositories are still being ingested.\n\n" \
-                       f"**Current Status:** `{current_status}`\n\n" \
-                       f"This usually takes 1-3 minutes depending on the number of repos. " \
-                       f"You can check the status badge above or refresh it in Settings."
-            st.session_state.messages.append({"role": "assistant", "content": response})
-            st.rerun()
-
-        elif current_status == "failed":
-            response = "❌ Ingestion failed. Please check your credentials in Settings and try again."
-            st.session_state.messages.append({"role": "assistant", "content": response})
-            st.rerun()
-
-        elif current_status == "not_found":
-            response = "⚠️ No ingestion found. Please click OK in Settings to start ingestion."
-            st.session_state.messages.append({"role": "assistant", "content": response})
-            st.rerun()
-
     with st.spinner("Thinking..."):
         try:
             # ---------- QUERY ----------
