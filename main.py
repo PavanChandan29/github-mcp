@@ -162,14 +162,27 @@ async def ingest_user(data: IngestRequest):
     try:
         LOGGER.info(f"🚀 Ingest API hit for user={data.user_name}")
 
-        # FIXED: Only mark as pending here
-        # The ingest() function will change it to "in_progress" when it actually starts
-        upsert_user(
-            user_name=data.user_name,
-            status="pending",
-            repo_count=0,
-            error=None,
-        )
+        # Try to mark as pending, but don't fail if this doesn't work
+        # The ingest() function will handle user record creation/updates
+        try:
+            upsert_user(
+                user_name=data.user_name,
+                status="pending",
+                repo_count=0,
+                error=None,
+            )
+        except Exception as user_error:
+            # Log but continue - ingestion will handle user record creation
+            LOGGER.warning(f"Could not set user status to pending: {user_error}. Continuing with ingestion.")
+
+        # Check if user already has data (optional - for optimization)
+        try:
+            existing_user = get_user_status(data.user_name)
+            if existing_user and existing_user.get("status") == "completed" and existing_user.get("repo_count", 0) > 0:
+                LOGGER.info(f"User {data.user_name} already has {existing_user.get('repo_count')} repos. Starting fresh ingestion anyway.")
+        except Exception:
+            # Ignore errors checking existing status
+            pass
 
         loop = asyncio.get_running_loop()
         loop.run_in_executor(
