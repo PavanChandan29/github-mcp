@@ -95,7 +95,19 @@ def connect():
             raise RuntimeError("DATABASE_URL not set for Postgres mode")
 
         LOGGER.info("Connecting to Supabase Postgres...")
-        return psycopg2.connect(database_url, cursor_factory=RealDictCursor)
+        conn = psycopg2.connect(database_url, cursor_factory=RealDictCursor)
+        
+        # Ensure search_path is set to public explicitly
+        # This is important for connection pooling (Supabase Pooler) where
+        # the search_path from connection string options might not persist
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SET search_path TO public")
+            # Note: SET is session-level, no commit needed
+        except Exception as e:
+            LOGGER.warning(f"Could not set search_path: {e}")
+        
+        return conn
 
     SQLITE_PATH.parent.mkdir(parents=True, exist_ok=True)
     LOGGER.warning("⚠️ Using local SQLite DB at %s", SQLITE_PATH)
@@ -105,7 +117,7 @@ def connect():
     return conn
 
 # =========================
-# SCHEMA (SQLite ONLY)
+# SCHEMA (SQLite)
 # =========================
 
 SCHEMA_SQL = """
@@ -199,7 +211,14 @@ ON repos(user_name, pushed_at DESC);
 
 def init_schema(conn):
     if get_db_mode() == "postgres":
-        LOGGER.info("Supabase schema is managed externally")
+        # Postgres schema is managed externally (tables already exist)
+        # Just verify connection works
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+            LOGGER.info("Postgres connection verified (schema managed externally)")
+        except Exception as e:
+            LOGGER.warning(f"Postgres connection check failed: {e}")
         return
 
     LOGGER.info("Initializing SQLite schema...")
