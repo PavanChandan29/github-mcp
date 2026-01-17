@@ -232,13 +232,13 @@ async def query_user(data: QueryRequest):
 
         initial_state = {
             "question": data.question,
-            "user_name": data.user_name,
+            "username": data.user_name,  # AgentState expects "username", not "user_name"
             "conversation_history": [],
             "last_repo": None,
             "last_repo_user": None,
-            "tool_name": None,
-            "tool_args": None,
-            "tool_result": None,
+            "plan": None,
+            "tool_calls": None,
+            "tool_results": None,
             "final_answer": None,
         }
 
