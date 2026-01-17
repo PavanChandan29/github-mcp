@@ -10,14 +10,21 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from concurrent.futures import ThreadPoolExecutor
 
-from github_mcp.common import connect
+from github_mcp.common import connect, get_db_mode
 from github_mcp.ingest import ingest
 from github_agent.agent import agent
 from github_mcp.user_service import upsert_user
 
 
-os.environ["DB_MODE"] = "postgres"
-os.environ["DATABASE_URL"] = os.getenv("DATABASE_URL")
+# Set DB_MODE from environment if not already set, otherwise use what get_db_mode() determines
+# This respects: .env file (sqlite), environment variables, or defaults to postgres
+if "DB_MODE" not in os.environ:
+    os.environ["DB_MODE"] = get_db_mode()
+
+# DATABASE_URL should be set from environment (e.g., bashrc on EC2)
+DATABASE_URL = os.getenv("DATABASE_URL")
+if DATABASE_URL:
+    os.environ["DATABASE_URL"] = DATABASE_URL
 
 # -------------------------------------------------
 # Force real-time logging (important for EC2)wh
