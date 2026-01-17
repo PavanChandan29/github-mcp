@@ -12,11 +12,49 @@ try:
 except ImportError:
     psycopg2 = None
 
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    load_dotenv = None
+
 LOGGER = logging.getLogger("github_mcp")
 logging.basicConfig(level=logging.INFO)
 
 def get_db_mode() -> str:
-    return os.environ.get("DB_MODE", "postgres").lower()
+    """
+    Determine DB_MODE with priority:
+    1. If .env has DB_MODE=sqlite, use sqlite
+    2. Otherwise, if DB_MODE is set in environment variables, use that
+    3. Otherwise, default to postgres
+    """
+    # First, check .env file directly for DB_MODE=sqlite
+    env_path = Path(__file__).parent / "secrets.env"
+    if env_path.exists():
+        try:
+            with open(env_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    # Skip comments and empty lines
+                    if not line or line.startswith("#"):
+                        continue
+                    # Check for DB_MODE=sqlite
+                    if "=" in line:
+                        key, value = line.split("=", 1)
+                        key = key.strip()
+                        value = value.strip().strip('"').strip("'")
+                        if key == "DB_MODE" and value.lower() == "sqlite":
+                            return "sqlite"
+        except Exception:
+            # If we can't read the file, continue with environment check
+            pass
+    
+    # If .env doesn't have DB_MODE=sqlite, check environment variables
+    env_db_mode = os.environ.get("DB_MODE", "").lower()
+    if env_db_mode:
+        return env_db_mode
+    
+    # Default to postgres
+    return "postgres"
 
 def get_database_url() -> Optional[str]:
     return os.environ.get("DATABASE_URL")
