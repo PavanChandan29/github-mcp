@@ -111,7 +111,7 @@ async def list_repos(user: str) -> list[dict[str, Any]]:
           is_archived,
           is_fork
         FROM repos
-        WHERE user=?
+        WHERE user_name=?
         ORDER BY pushed_at DESC, repo
         """,
         (user,),
@@ -130,17 +130,17 @@ async def get_repo_overview(user: str, repo: str) -> dict[str, Any]:
     """
     conn = _conn_for(user)
 
-    r = fetchone(conn, "SELECT * FROM repos WHERE user=? AND repo=?", (user, repo))
+    r = fetchone(conn, "SELECT * FROM repos WHERE user_name=? AND repo=?", (user, repo))
     if not r:
         return {"error": f"Repo not found in MCP store: {user}/{repo}. Run ingestion first."}
 
-    s = fetchone(conn, "SELECT * FROM repo_signals WHERE user=? AND repo=?", (user, repo)) or {}
+    s = fetchone(conn, "SELECT * FROM repo_signals WHERE user_name=? AND repo=?", (user, repo)) or {}
 
     topics = _loads_json_list(r.get("topics"))
 
     commit_count_row = fetchone(
         conn,
-        "SELECT COUNT(*) as count FROM commits WHERE user=? AND repo=?",
+        "SELECT COUNT(*) as count FROM commits WHERE user_name=? AND repo=?",
         (user, repo),
     ) or {}
     commit_count = _safe_int(commit_count_row.get("count", 0), 0)
@@ -231,7 +231,7 @@ async def get_commit_timeline(user: str, repo: str, limit: int = 50) -> list[dic
         SELECT sha, authored_at, message, author_name, author_login,
                files_changed, additions, deletions
         FROM commits
-        WHERE user=? AND repo=?
+        WHERE user_name=? AND repo=?
         ORDER BY authored_at DESC
         LIMIT ?
         """,
@@ -256,7 +256,7 @@ async def search_readmes(user: str, query: str, limit: int = 10) -> list[dict[st
         """
         SELECT repo, html_url, description
         FROM repos
-        WHERE user=? AND (readme_text LIKE ? OR description LIKE ?)
+        WHERE user_name=? AND (readme_text LIKE ? OR description LIKE ?)
         ORDER BY repo
         LIMIT ?
         """,
@@ -291,7 +291,7 @@ async def query_repos_by_signals(
     """
     conn = _conn_for(user)
 
-    conditions = ["user=?"]
+    conditions = ["user_name=?"]
     params: list[Any] = [user]
 
     if tech_stack:
@@ -382,15 +382,15 @@ async def aggregate_repo_metrics(user: str) -> dict[str, Any]:
         return _safe_int(row.get("c", 0), 0)
 
     return {
-        "total_repos": _count("SELECT COUNT(*) as c FROM repos WHERE user=?", (user,)),
-        "ci_cd_repos": _count("SELECT COUNT(*) as c FROM repo_signals WHERE user=? AND has_ci_config=1", (user,)),
-        "github_actions_repos": _count("SELECT COUNT(*) as c FROM repo_signals WHERE user=? AND has_github_actions=1", (user,)),
-        "test_repos": _count("SELECT COUNT(*) as c FROM repo_signals WHERE user=? AND has_tests=1", (user,)),
-        "lint_repos": _count("SELECT COUNT(*) as c FROM repo_signals WHERE user=? AND has_lint_config=1", (user,)),
-        "precommit_repos": _count("SELECT COUNT(*) as c FROM repo_signals WHERE user=? AND has_precommit=1", (user,)),
-        "docker_repos": _count("SELECT COUNT(*) as c FROM repo_signals WHERE user=? AND has_dockerfile=1", (user,)),
-        "python_repos": _count("SELECT COUNT(*) as c FROM repo_signals WHERE user=? AND tech_stack LIKE '%Python%'", (user,)),
-        "sql_hint_repos": _count("SELECT COUNT(*) as c FROM repos WHERE user=? AND (description LIKE '%SQL%' OR readme_text LIKE '%SQL%')", (user,)),
+        "total_repos": _count("SELECT COUNT(*) as c FROM repos WHERE user_name=?", (user,)),
+        "ci_cd_repos": _count("SELECT COUNT(*) as c FROM repo_signals WHERE user_name=? AND has_ci_config=1", (user,)),
+        "github_actions_repos": _count("SELECT COUNT(*) as c FROM repo_signals WHERE user_name=? AND has_github_actions=1", (user,)),
+        "test_repos": _count("SELECT COUNT(*) as c FROM repo_signals WHERE user_name=? AND has_tests=1", (user,)),
+        "lint_repos": _count("SELECT COUNT(*) as c FROM repo_signals WHERE user_name=? AND has_lint_config=1", (user,)),
+        "precommit_repos": _count("SELECT COUNT(*) as c FROM repo_signals WHERE user_name=? AND has_precommit=1", (user,)),
+        "docker_repos": _count("SELECT COUNT(*) as c FROM repo_signals WHERE user_name=? AND has_dockerfile=1", (user,)),
+        "python_repos": _count("SELECT COUNT(*) as c FROM repo_signals WHERE user_name=? AND tech_stack LIKE '%Python%'", (user,)),
+        "sql_hint_repos": _count("SELECT COUNT(*) as c FROM repos WHERE user_name=? AND (description LIKE '%SQL%' OR readme_text LIKE '%SQL%')", (user,)),
     }
 
 
@@ -407,7 +407,7 @@ async def rank_repos_by_activity(user: str, limit: int = 10) -> list[dict[str, A
         """
         SELECT repo, COUNT(*) as commit_count
         FROM commits
-        WHERE user=?
+        WHERE user_name=?
         GROUP BY repo
         ORDER BY commit_count DESC, repo ASC
         LIMIT ?
